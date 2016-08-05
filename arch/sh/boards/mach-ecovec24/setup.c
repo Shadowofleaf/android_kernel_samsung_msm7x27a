@@ -11,15 +11,16 @@
 #include <linux/init.h>
 #include <linux/device.h>
 #include <linux/platform_device.h>
-#include <linux/mfd/sh_mobile_sdhi.h>
 #include <linux/mmc/host.h>
 #include <linux/mmc/sh_mmcif.h>
+#include <linux/mmc/sh_mobile_sdhi.h>
 #include <linux/mtd/physmap.h>
 #include <linux/gpio.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/delay.h>
 #include <linux/usb/r8a66597.h>
+#include <linux/usb/renesas_usbhs.h>
 #include <linux/i2c.h>
 #include <linux/i2c/tsc2007.h>
 #include <linux/spi/spi.h>
@@ -27,13 +28,15 @@
 #include <linux/spi/mmc_spi.h>
 #include <linux/input.h>
 #include <linux/input/sh_keysc.h>
+#include <linux/sh_eth.h>
+#include <linux/videodev2.h>
 #include <video/sh_mobile_lcdc.h>
 #include <sound/sh_fsi.h>
 #include <media/sh_mobile_ceu.h>
+#include <media/soc_camera.h>
 #include <media/tw9910.h>
 #include <media/mt9t112.h>
 #include <asm/heartbeat.h>
-#include <asm/sh_eth.h>
 #include <asm/clock.h>
 #include <asm/suspend.h>
 #include <cpu/sh7724.h>
@@ -142,6 +145,8 @@ static struct resource sh_eth_resources[] = {
 static struct sh_eth_plat_data sh_eth_plat = {
 	.phy = 0x1f, /* SMSC LAN8700 */
 	.edmac_endian = EDMAC_LITTLE_ENDIAN,
+	.register_type = SH_ETH_REG_FAST_SH4,
+	.phy_interface = PHY_INTERFACE_MODE_MII,
 	.ether_link_active_low = 1
 };
 
@@ -153,9 +158,6 @@ static struct platform_device sh_eth_device = {
 	},
 	.num_resources = ARRAY_SIZE(sh_eth_resources),
 	.resource = sh_eth_resources,
-	.archdata = {
-		.hwblk_id = HWBLK_ETHER,
-	},
 };
 
 /* USB0 host */
@@ -230,8 +232,55 @@ static struct platform_device usb1_common_device = {
 	.resource	= usb1_common_resources,
 };
 
+/*
+ * USBHS
+ */
+static int usbhs_get_id(struct platform_device *pdev)
+{
+	return gpio_get_value(GPIO_PTB3);
+}
+
+static struct renesas_usbhs_platform_info usbhs_info = {
+	.platform_callback = {
+		.get_id		= usbhs_get_id,
+	},
+	.driver_param = {
+		.buswait_bwait		= 4,
+		.detection_delay	= 5,
+		.d0_tx_id = SHDMA_SLAVE_USB1D0_TX,
+		.d0_rx_id = SHDMA_SLAVE_USB1D0_RX,
+		.d1_tx_id = SHDMA_SLAVE_USB1D1_TX,
+		.d1_rx_id = SHDMA_SLAVE_USB1D1_RX,
+	},
+};
+
+static struct resource usbhs_resources[] = {
+	[0] = {
+		.start	= 0xa4d90000,
+		.end	= 0xa4d90124 - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+	[1] = {
+		.start	= 66,
+		.end	= 66,
+		.flags	= IORESOURCE_IRQ,
+	},
+};
+
+static struct platform_device usbhs_device = {
+	.name	= "renesas_usbhs",
+	.id	= 1,
+	.dev = {
+		.dma_mask		= NULL,         /*  not use dma */
+		.coherent_dma_mask	= 0xffffffff,
+		.platform_data		= &usbhs_info,
+	},
+	.num_resources	= ARRAY_SIZE(usbhs_resources),
+	.resource	= usbhs_resources,
+};
+
 /* LCDC */
-const static struct fb_videomode ecovec_lcd_modes[] = {
+static const struct fb_videomode ecovec_lcd_modes[] = {
 	{
 		.name		= "Panel",
 		.xres		= 800,
@@ -246,7 +295,7 @@ const static struct fb_videomode ecovec_lcd_modes[] = {
 	},
 };
 
-const static struct fb_videomode ecovec_dvi_modes[] = {
+static const struct fb_videomode ecovec_dvi_modes[] = {
 	{
 		.name		= "DVI",
 		.xres		= 1280,
@@ -261,16 +310,32 @@ const static struct fb_videomode ecovec_dvi_modes[] = {
 	},
 };
 
+static int ecovec24_set_brightness(int brightness)
+{
+	gpio_set_value(GPIO_PTR1, brightness);
+
+	return 0;
+}
+
+static int ecovec24_get_brightness(void)
+{
+	return gpio_get_value(GPIO_PTR1);
+}
+
 static struct sh_mobile_lcdc_info lcdc_info = {
 	.ch[0] = {
 		.interface_type = RGB18,
 		.chan = LCDC_CHAN_MAINLCD,
-		.bpp = 16,
-		.lcd_size_cfg = { /* 7.0 inch */
+		.fourcc = V4L2_PIX_FMT_RGB565,
+		.panel_cfg = { /* 7.0 inch */
 			.width = 152,
 			.height = 91,
 		},
-		.board_cfg = {
+		.bl_info = {
+			.name = "sh_mobile_lcdc_bl",
+			.max_brightness = 1,
+			.set_brightness = ecovec24_set_brightness,
+			.get_brightness = ecovec24_get_brightness,
 		},
 	}
 };
@@ -294,9 +359,6 @@ static struct platform_device lcdc_device = {
 	.resource	= lcdc_resources,
 	.dev		= {
 		.platform_data	= &lcdc_info,
-	},
-	.archdata = {
-		.hwblk_id = HWBLK_LCDC,
 	},
 };
 
@@ -329,9 +391,6 @@ static struct platform_device ceu0_device = {
 	.dev	= {
 		.platform_data	= &sh_mobile_ceu0_info,
 	},
-	.archdata = {
-		.hwblk_id = HWBLK_CEU0,
-	},
 };
 
 /* CEU1 */
@@ -362,9 +421,6 @@ static struct platform_device ceu1_device = {
 	.resource	= ceu1_resources,
 	.dev	= {
 		.platform_data	= &sh_mobile_ceu1_info,
-	},
-	.archdata = {
-		.hwblk_id = HWBLK_CEU1,
 	},
 };
 
@@ -420,9 +476,6 @@ static struct platform_device keysc_device = {
 	.dev	= {
 		.platform_data	= &keysc_info,
 	},
-	.archdata = {
-		.hwblk_id = HWBLK_KEYSC,
-	},
 };
 
 /* TouchScreen */
@@ -462,25 +515,32 @@ static struct i2c_board_info ts_i2c_clients = {
 	.irq		= IRQ0,
 };
 
-#ifdef CONFIG_MFD_SH_MOBILE_SDHI
+#if defined(CONFIG_MMC_SDHI) || defined(CONFIG_MMC_SDHI_MODULE)
 /* SDHI0 */
 static void sdhi0_set_pwr(struct platform_device *pdev, int state)
 {
 	gpio_set_value(GPIO_PTB6, state);
 }
 
+static int sdhi0_get_cd(struct platform_device *pdev)
+{
+	return !gpio_get_value(GPIO_PTY7);
+}
+
 static struct sh_mobile_sdhi_info sdhi0_info = {
 	.dma_slave_tx	= SHDMA_SLAVE_SDHI0_TX,
 	.dma_slave_rx	= SHDMA_SLAVE_SDHI0_RX,
 	.set_pwr	= sdhi0_set_pwr,
-	.tmio_caps      = MMC_CAP_SDIO_IRQ | MMC_CAP_POWER_OFF_CARD,
+	.tmio_caps      = MMC_CAP_SDIO_IRQ | MMC_CAP_POWER_OFF_CARD |
+			  MMC_CAP_NEEDS_POLL,
+	.get_cd		= sdhi0_get_cd,
 };
 
 static struct resource sdhi0_resources[] = {
 	[0] = {
 		.name	= "SDHI0",
 		.start  = 0x04ce0000,
-		.end    = 0x04ce01ff,
+		.end    = 0x04ce00ff,
 		.flags  = IORESOURCE_MEM,
 	},
 	[1] = {
@@ -497,30 +557,34 @@ static struct platform_device sdhi0_device = {
 	.dev	= {
 		.platform_data	= &sdhi0_info,
 	},
-	.archdata = {
-		.hwblk_id = HWBLK_SDHI0,
-	},
 };
 
-#if !defined(CONFIG_MMC_SH_MMCIF)
+#if !defined(CONFIG_MMC_SH_MMCIF) && !defined(CONFIG_MMC_SH_MMCIF_MODULE)
 /* SDHI1 */
 static void sdhi1_set_pwr(struct platform_device *pdev, int state)
 {
 	gpio_set_value(GPIO_PTB7, state);
 }
 
+static int sdhi1_get_cd(struct platform_device *pdev)
+{
+	return !gpio_get_value(GPIO_PTW7);
+}
+
 static struct sh_mobile_sdhi_info sdhi1_info = {
 	.dma_slave_tx	= SHDMA_SLAVE_SDHI1_TX,
 	.dma_slave_rx	= SHDMA_SLAVE_SDHI1_RX,
-	.tmio_caps      = MMC_CAP_SDIO_IRQ | MMC_CAP_POWER_OFF_CARD,
+	.tmio_caps      = MMC_CAP_SDIO_IRQ | MMC_CAP_POWER_OFF_CARD |
+			  MMC_CAP_NEEDS_POLL,
 	.set_pwr	= sdhi1_set_pwr,
+	.get_cd		= sdhi1_get_cd,
 };
 
 static struct resource sdhi1_resources[] = {
 	[0] = {
 		.name	= "SDHI1",
 		.start  = 0x04cf0000,
-		.end    = 0x04cf01ff,
+		.end    = 0x04cf00ff,
 		.flags  = IORESOURCE_MEM,
 	},
 	[1] = {
@@ -536,9 +600,6 @@ static struct platform_device sdhi1_device = {
 	.id             = 1,
 	.dev	= {
 		.platform_data	= &sdhi1_info,
-	},
-	.archdata = {
-		.hwblk_id = HWBLK_SDHI1,
 	},
 };
 #endif /* CONFIG_MMC_SH_MMCIF */
@@ -605,9 +666,6 @@ static struct platform_device msiof0_device = {
 	},
 	.num_resources	= ARRAY_SIZE(msiof0_resources),
 	.resource	= msiof0_resources,
-	.archdata = {
-		.hwblk_id = HWBLK_MSIOF0,
-	},
 };
 
 #endif
@@ -723,11 +781,9 @@ static struct platform_device camera_devices[] = {
 
 /* FSI */
 static struct sh_fsi_platform_info fsi_info = {
-	.portb_flags = SH_FSI_BRS_INV |
-		       SH_FSI_OUT_SLAVE_MODE |
-		       SH_FSI_IN_SLAVE_MODE |
-		       SH_FSI_OFMT(I2S) |
-		       SH_FSI_IFMT(I2S),
+	.port_b = {
+		.flags = SH_FSI_BRS_INV,
+	},
 };
 
 static struct resource fsi_resources[] = {
@@ -750,9 +806,6 @@ static struct platform_device fsi_device = {
 	.resource	= fsi_resources,
 	.dev	= {
 		.platform_data	= &fsi_info,
-	},
-	.archdata = {
-		.hwblk_id = HWBLK_SPU, /* FSI needs SPU hwblk */
 	},
 };
 
@@ -815,12 +868,9 @@ static struct platform_device vou_device = {
 	.dev		= {
 		.platform_data	= &sh_vou_pdata,
 	},
-	.archdata	= {
-		.hwblk_id	= HWBLK_VOU,
-	},
 };
 
-#if defined(CONFIG_MMC_SH_MMCIF)
+#if defined(CONFIG_MMC_SH_MMCIF) || defined(CONFIG_MMC_SH_MMCIF_MODULE)
 /* SH_MMCIF */
 static void mmcif_set_pwr(struct platform_device *pdev, int state)
 {
@@ -878,13 +928,14 @@ static struct platform_device *ecovec_devices[] __initdata = {
 	&sh_eth_device,
 	&usb0_host_device,
 	&usb1_common_device,
+	&usbhs_device,
 	&lcdc_device,
 	&ceu0_device,
 	&ceu1_device,
 	&keysc_device,
-#ifdef CONFIG_MFD_SH_MOBILE_SDHI
+#if defined(CONFIG_MMC_SDHI) || defined(CONFIG_MMC_SDHI_MODULE)
 	&sdhi0_device,
-#if !defined(CONFIG_MMC_SH_MMCIF)
+#if !defined(CONFIG_MMC_SH_MMCIF) && !defined(CONFIG_MMC_SH_MMCIF_MODULE)
 	&sdhi1_device,
 #endif
 #else
@@ -896,7 +947,7 @@ static struct platform_device *ecovec_devices[] __initdata = {
 	&fsi_device,
 	&irda_device,
 	&vou_device,
-#if defined(CONFIG_MMC_SH_MMCIF)
+#if defined(CONFIG_MMC_SH_MMCIF) || defined(CONFIG_MMC_SH_MMCIF_MODULE)
 	&sh_mmcif_device,
 #endif
 };
@@ -938,7 +989,7 @@ static void __init sh_eth_init(struct sh_eth_plat_data *pd)
 		return;
 	}
 
-	/* read MAC address frome EEPROM */
+	/* read MAC address from EEPROM */
 	for (i = 0; i < sizeof(pd->mac_addr); i++) {
 		pd->mac_addr[i] = mac_read(a, 0x10 + i);
 		msleep(10);
@@ -964,6 +1015,7 @@ extern char ecovec24_sdram_leave_end;
 static int __init arch_setup(void)
 {
 	struct clk *clk;
+	bool cn12_enabled = false;
 
 	/* register board specific self-refresh code */
 	sh_mobile_register_self_refresh(SUSP_SH_STANDBY | SUSP_SH_SF |
@@ -1079,8 +1131,8 @@ static int __init arch_setup(void)
 		/* DVI */
 		lcdc_info.clock_source			= LCDC_CLK_EXTERNAL;
 		lcdc_info.ch[0].clock_divider		= 1;
-		lcdc_info.ch[0].lcd_cfg			= ecovec_dvi_modes;
-		lcdc_info.ch[0].num_cfg			= ARRAY_SIZE(ecovec_dvi_modes);
+		lcdc_info.ch[0].lcd_modes		= ecovec_dvi_modes;
+		lcdc_info.ch[0].num_modes		= ARRAY_SIZE(ecovec_dvi_modes);
 
 		gpio_set_value(GPIO_PTA2, 1);
 		gpio_set_value(GPIO_PTU1, 1);
@@ -1088,8 +1140,8 @@ static int __init arch_setup(void)
 		/* Panel */
 		lcdc_info.clock_source			= LCDC_CLK_PERIPHERAL;
 		lcdc_info.ch[0].clock_divider		= 2;
-		lcdc_info.ch[0].lcd_cfg			= ecovec_lcd_modes;
-		lcdc_info.ch[0].num_cfg			= ARRAY_SIZE(ecovec_lcd_modes);
+		lcdc_info.ch[0].lcd_modes		= ecovec_lcd_modes;
+		lcdc_info.ch[0].num_modes		= ARRAY_SIZE(ecovec_lcd_modes);
 
 		gpio_set_value(GPIO_PTR1, 1);
 
@@ -1104,7 +1156,7 @@ static int __init arch_setup(void)
 
 		/* enable TouchScreen */
 		i2c_register_board_info(0, &ts_i2c_clients, 1);
-		set_irq_type(IRQ0, IRQ_TYPE_LEVEL_LOW);
+		irq_set_irq_type(IRQ0, IRQ_TYPE_LEVEL_LOW);
 	}
 
 	/* enable CEU0 */
@@ -1164,9 +1216,13 @@ static int __init arch_setup(void)
 	gpio_direction_input(GPIO_PTR5);
 	gpio_direction_input(GPIO_PTR6);
 
-#ifdef CONFIG_MFD_SH_MOBILE_SDHI
+	/* SD-card slot CN11 */
+	/* Card-detect, used on CN11, either with SDHI0 or with SPI */
+	gpio_request(GPIO_PTY7, NULL);
+	gpio_direction_input(GPIO_PTY7);
+
+#if defined(CONFIG_MMC_SDHI) || defined(CONFIG_MMC_SDHI_MODULE)
 	/* enable SDHI0 on CN11 (needs DS2.4 set to ON) */
-	gpio_request(GPIO_FN_SDHI0CD,  NULL);
 	gpio_request(GPIO_FN_SDHI0WP,  NULL);
 	gpio_request(GPIO_FN_SDHI0CMD, NULL);
 	gpio_request(GPIO_FN_SDHI0CLK, NULL);
@@ -1176,23 +1232,6 @@ static int __init arch_setup(void)
 	gpio_request(GPIO_FN_SDHI0D0,  NULL);
 	gpio_request(GPIO_PTB6, NULL);
 	gpio_direction_output(GPIO_PTB6, 0);
-
-#if !defined(CONFIG_MMC_SH_MMCIF)
-	/* enable SDHI1 on CN12 (needs DS2.6,7 set to ON,OFF) */
-	gpio_request(GPIO_FN_SDHI1CD,  NULL);
-	gpio_request(GPIO_FN_SDHI1WP,  NULL);
-	gpio_request(GPIO_FN_SDHI1CMD, NULL);
-	gpio_request(GPIO_FN_SDHI1CLK, NULL);
-	gpio_request(GPIO_FN_SDHI1D3,  NULL);
-	gpio_request(GPIO_FN_SDHI1D2,  NULL);
-	gpio_request(GPIO_FN_SDHI1D1,  NULL);
-	gpio_request(GPIO_FN_SDHI1D0,  NULL);
-	gpio_request(GPIO_PTB7, NULL);
-	gpio_direction_output(GPIO_PTB7, 0);
-
-	/* I/O buffer drive ability is high for SDHI1 */
-	__raw_writew((__raw_readw(IODRIVEA) & ~0x3000) | 0x2000 , IODRIVEA);
-#endif /* CONFIG_MMC_SH_MMCIF */
 #else
 	/* enable MSIOF0 on CN11 (needs DS2.4 set to OFF) */
 	gpio_request(GPIO_FN_MSIOF0_TXD, NULL);
@@ -1204,11 +1243,50 @@ static int __init arch_setup(void)
 	gpio_direction_output(GPIO_PTB6, 0); /* disable power by default */
 	gpio_request(GPIO_PTY6, NULL); /* write protect */
 	gpio_direction_input(GPIO_PTY6);
-	gpio_request(GPIO_PTY7, NULL); /* card detect */
-	gpio_direction_input(GPIO_PTY7);
 
 	spi_register_board_info(spi_bus, ARRAY_SIZE(spi_bus));
 #endif
+
+	/* MMC/SD-card slot CN12 */
+#if defined(CONFIG_MMC_SH_MMCIF) || defined(CONFIG_MMC_SH_MMCIF_MODULE)
+	/* enable MMCIF (needs DS2.6,7 set to OFF,ON) */
+	gpio_request(GPIO_FN_MMC_D7, NULL);
+	gpio_request(GPIO_FN_MMC_D6, NULL);
+	gpio_request(GPIO_FN_MMC_D5, NULL);
+	gpio_request(GPIO_FN_MMC_D4, NULL);
+	gpio_request(GPIO_FN_MMC_D3, NULL);
+	gpio_request(GPIO_FN_MMC_D2, NULL);
+	gpio_request(GPIO_FN_MMC_D1, NULL);
+	gpio_request(GPIO_FN_MMC_D0, NULL);
+	gpio_request(GPIO_FN_MMC_CLK, NULL);
+	gpio_request(GPIO_FN_MMC_CMD, NULL);
+	gpio_request(GPIO_PTB7, NULL);
+	gpio_direction_output(GPIO_PTB7, 0);
+
+	cn12_enabled = true;
+#elif defined(CONFIG_MMC_SDHI) || defined(CONFIG_MMC_SDHI_MODULE)
+	/* enable SDHI1 on CN12 (needs DS2.6,7 set to ON,OFF) */
+	gpio_request(GPIO_FN_SDHI1WP,  NULL);
+	gpio_request(GPIO_FN_SDHI1CMD, NULL);
+	gpio_request(GPIO_FN_SDHI1CLK, NULL);
+	gpio_request(GPIO_FN_SDHI1D3,  NULL);
+	gpio_request(GPIO_FN_SDHI1D2,  NULL);
+	gpio_request(GPIO_FN_SDHI1D1,  NULL);
+	gpio_request(GPIO_FN_SDHI1D0,  NULL);
+	gpio_request(GPIO_PTB7, NULL);
+	gpio_direction_output(GPIO_PTB7, 0);
+
+	/* Card-detect, used on CN12 with SDHI1 */
+	gpio_request(GPIO_PTW7, NULL);
+	gpio_direction_input(GPIO_PTW7);
+
+	cn12_enabled = true;
+#endif
+
+	if (cn12_enabled)
+		/* I/O buffer drive ability is high for CN12 */
+		__raw_writew((__raw_readw(IODRIVEA) & ~0x3000) | 0x2000,
+			     IODRIVEA);
 
 	/* enable Video */
 	gpio_request(GPIO_PTU2, NULL);
@@ -1267,25 +1345,6 @@ static int __init arch_setup(void)
 	gpio_request(GPIO_FN_IRDA_IN,  NULL);
 	gpio_request(GPIO_PTU5, NULL);
 	gpio_direction_output(GPIO_PTU5, 0);
-
-#if defined(CONFIG_MMC_SH_MMCIF)
-	/* enable MMCIF (needs DS2.6,7 set to OFF,ON) */
-	gpio_request(GPIO_FN_MMC_D7, NULL);
-	gpio_request(GPIO_FN_MMC_D6, NULL);
-	gpio_request(GPIO_FN_MMC_D5, NULL);
-	gpio_request(GPIO_FN_MMC_D4, NULL);
-	gpio_request(GPIO_FN_MMC_D3, NULL);
-	gpio_request(GPIO_FN_MMC_D2, NULL);
-	gpio_request(GPIO_FN_MMC_D1, NULL);
-	gpio_request(GPIO_FN_MMC_D0, NULL);
-	gpio_request(GPIO_FN_MMC_CLK, NULL);
-	gpio_request(GPIO_FN_MMC_CMD, NULL);
-	gpio_request(GPIO_PTB7, NULL);
-	gpio_direction_output(GPIO_PTB7, 0);
-
-	/* I/O buffer drive ability is high for MMCIF */
-	__raw_writew((__raw_readw(IODRIVEA) & ~0x3000) | 0x2000 , IODRIVEA);
-#endif
 
 	/* enable I2C device */
 	i2c_register_board_info(0, i2c0_devices,

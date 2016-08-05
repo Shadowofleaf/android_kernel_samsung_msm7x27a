@@ -18,12 +18,19 @@
 #include <linux/mfd/core.h>
 #include <linux/mfd/max8925.h>
 
+static struct resource io_parent = {
+	.start = 0,
+	.end   = 0xffffffff,
+	.flags = IORESOURCE_IO,
+};
+
 static struct resource backlight_resources[] = {
 	{
 		.name	= "max8925-backlight",
 		.start	= MAX8925_WLED_MODE_CNTL,
 		.end	= MAX8925_WLED_CNTL,
 		.flags	= IORESOURCE_IO,
+		.parent = &io_parent,
 	},
 };
 
@@ -42,6 +49,7 @@ static struct resource touch_resources[] = {
 		.start	= MAX8925_TSC_IRQ,
 		.end	= MAX8925_ADC_RES_END,
 		.flags	= IORESOURCE_IO,
+		.parent = &io_parent,
 	},
 };
 
@@ -60,6 +68,7 @@ static struct resource power_supply_resources[] = {
 		.start	= MAX8925_CHG_IRQ1,
 		.end	= MAX8925_CHG_IRQ1_MASK,
 		.flags	= IORESOURCE_IO,
+		.parent = &io_parent,
 	},
 };
 
@@ -118,6 +127,7 @@ static struct mfd_cell onkey_devs[] = {
 	.start	= MAX8925_##_start,		\
 	.end	= MAX8925_##_end,		\
 	.flags	= IORESOURCE_IO,		\
+	.parent = &io_parent,			\
 }
 
 static struct resource regulator_resources[] = {
@@ -209,21 +219,6 @@ static struct max8925_irq_data max8925_irqs[] = {
 		.reg		= MAX8925_CHG_IRQ1,
 		.mask_reg	= MAX8925_CHG_IRQ1_MASK,
 		.offs		= 1 << 2,
-	},
-	[MAX8925_IRQ_VCHG_USB_OVP] = {
-		.reg		= MAX8925_CHG_IRQ1,
-		.mask_reg	= MAX8925_CHG_IRQ1_MASK,
-		.offs		= 1 << 3,
-	},
-	[MAX8925_IRQ_VCHG_USB_F] =  {
-		.reg		= MAX8925_CHG_IRQ1,
-		.mask_reg	= MAX8925_CHG_IRQ1_MASK,
-		.offs		= 1 << 4,
-	},
-	[MAX8925_IRQ_VCHG_USB_R] = {
-		.reg		= MAX8925_CHG_IRQ1,
-		.mask_reg	= MAX8925_CHG_IRQ1_MASK,
-		.offs		= 1 << 5,
 	},
 	[MAX8925_IRQ_VCHG_THM_OK_R] = {
 		.reg		= MAX8925_CHG_IRQ2,
@@ -517,7 +512,6 @@ static int max8925_irq_init(struct max8925_chip *chip, int irq,
 			    struct max8925_platform_data *pdata)
 {
 	unsigned long flags = IRQF_TRIGGER_FALLING | IRQF_ONESHOT;
-	struct irq_desc *desc;
 	int i, ret;
 	int __irq;
 
@@ -544,19 +538,18 @@ static int max8925_irq_init(struct max8925_chip *chip, int irq,
 	mutex_init(&chip->irq_lock);
 	chip->core_irq = irq;
 	chip->irq_base = pdata->irq_base;
-	desc = irq_to_desc(chip->core_irq);
 
 	/* register with genirq */
 	for (i = 0; i < ARRAY_SIZE(max8925_irqs); i++) {
 		__irq = i + chip->irq_base;
-		set_irq_chip_data(__irq, chip);
-		set_irq_chip_and_handler(__irq, &max8925_irq_chip,
+		irq_set_chip_data(__irq, chip);
+		irq_set_chip_and_handler(__irq, &max8925_irq_chip,
 					 handle_edge_irq);
-		set_irq_nested_thread(__irq, 1);
+		irq_set_nested_thread(__irq, 1);
 #ifdef CONFIG_ARM
 		set_irq_flags(__irq, IRQF_VALID);
 #else
-		set_irq_noprobe(__irq);
+		irq_set_noprobe(__irq);
 #endif
 	}
 	if (!irq) {
@@ -629,7 +622,7 @@ int __devinit max8925_device_init(struct max8925_chip *chip,
 		goto out_dev;
 	}
 
-	if (pdata && pdata->regulator[0]) {
+	if (pdata) {
 		ret = mfd_add_devices(chip->dev, 0, &regulator_devs[0],
 				      ARRAY_SIZE(regulator_devs),
 				      &regulator_resources[0], 0);

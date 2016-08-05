@@ -14,7 +14,7 @@
 #include <linux/mempolicy.h>
 #include <linux/syscalls.h>
 #include <linux/sched.h>
-#include <linux/module.h>
+#include <linux/export.h>
 #include <linux/rmap.h>
 #include <linux/mmzone.h>
 #include <linux/hugetlb.h>
@@ -78,6 +78,7 @@ void __clear_page_mlock(struct page *page)
  */
 void mlock_vma_page(struct page *page)
 {
+	/* Serialize with page migration */
 	BUG_ON(!PageLocked(page));
 
 	if (!TestSetPageMlocked(page)) {
@@ -105,12 +106,21 @@ void mlock_vma_page(struct page *page)
  */
 void munlock_vma_page(struct page *page)
 {
+	/* For try_to_munlock() and to serialize with page migration */
 	BUG_ON(!PageLocked(page));
 
 	if (TestClearPageMlocked(page)) {
 		dec_zone_page_state(page, NR_MLOCK);
 		if (!isolate_lru_page(page)) {
-			int ret = try_to_munlock(page);
+			int ret = SWAP_AGAIN;
+
+			/*
+			 * Optimization: if the page was mapped just once,
+			 * that's our mapping and we don't need to check all the
+			 * other vmas.
+			 */
+			if (page_mapcount(page) > 1)
+				ret = try_to_munlock(page);
 			/*
 			 * did try_to_unlock() succeed or punt?
 			 */
@@ -221,7 +231,9 @@ long mlock_vma_pages_range(struct vm_area_struct *vma,
 
 	if (!((vma->vm_flags & (VM_DONTEXPAND | VM_RESERVED)) ||
 			is_vm_hugetlb_page(vma) ||
-			vma == get_gate_vma(current))) {
+			vma == get_gate_vma(current->mm) ||
+			((use_user_accessible_timers() &&
+				(vma == get_user_timers_vma(current->mm)))))) {
 
 		__mlock_vma_pages_range(vma, start, end, NULL);
 
@@ -307,16 +319,18 @@ void munlock_vma_pages_range(struct vm_area_struct *vma,
  * For vmas that pass the filters, merge/split as appropriate.
  */
 static int mlock_fixup(struct vm_area_struct *vma, struct vm_area_struct **prev,
-	unsigned long start, unsigned long end, unsigned int newflags)
+	unsigned long start, unsigned long end, vm_flags_t newflags)
 {
 	struct mm_struct *mm = vma->vm_mm;
 	pgoff_t pgoff;
 	int nr_pages;
 	int ret = 0;
-	int lock = newflags & VM_LOCKED;
+	int lock = !!(newflags & VM_LOCKED);
 
 	if (newflags == vma->vm_flags || (vma->vm_flags & VM_SPECIAL) ||
-	    is_vm_hugetlb_page(vma) || vma == get_gate_vma(current))
+	    is_vm_hugetlb_page(vma) || vma == get_gate_vma(current->mm) ||
+	    ((use_user_accessible_timers()) &&
+		(vma == get_user_timers_vma(current->mm))))
 		goto out;	/* don't set VM_LOCKED,  don't count */
 
 	pgoff = vma->vm_pgoff + ((start - vma->vm_start) >> PAGE_SHIFT);
@@ -377,15 +391,16 @@ static int do_mlock(unsigned long start, size_t len, int on)
 		return -EINVAL;
 	if (end == start)
 		return 0;
-	vma = find_vma_prev(current->mm, start, &prev);
+	vma = find_vma(current->mm, start);
 	if (!vma || vma->vm_start > start)
 		return -ENOMEM;
 
+	prev = vma->vm_prev;
 	if (start > vma->vm_start)
 		prev = vma;
 
 	for (nstart = start ; ; ) {
-		unsigned int newflags;
+		vm_flags_t newflags;
 
 		/* Here we know that  vma->vm_start <= nstart < vma->vm_end. */
 
@@ -524,7 +539,7 @@ static int do_mlockall(int flags)
 		goto out;
 
 	for (vma = current->mm->mmap; vma ; vma = prev->vm_next) {
-		unsigned int newflags;
+		vm_flags_t newflags;
 
 		newflags = vma->vm_flags | VM_LOCKED;
 		if (!(flags & MCL_CURRENT))
@@ -549,7 +564,8 @@ SYSCALL_DEFINE1(mlockall, int, flags)
 	if (!can_do_mlock())
 		goto out;
 
-	lru_add_drain_all();	/* flush pagevec */
+	if (flags & MCL_CURRENT)
+		lru_add_drain_all();	/* flush pagevec */
 
 	down_write(&current->mm->mmap_sem);
 

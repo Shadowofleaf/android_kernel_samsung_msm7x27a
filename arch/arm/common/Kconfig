@@ -1,13 +1,25 @@
 config ARM_GIC
+	select IRQ_DOMAIN
+	select MULTI_IRQ_HANDLER
+	select MSM_SHOW_RESUME_IRQ
 	bool
 
+config GIC_NON_BANKED
+	bool
+
+config GIC_SECURE
+	bool
+	depends on ARM_GIC
+
 config ARM_VIC
+	select IRQ_DOMAIN
+	select MULTI_IRQ_HANDLER
 	bool
 
 config ARM_VIC_NR
 	int
 	default 4 if ARCH_S5PV210
-	default 3 if ARCH_S5P6442 || ARCH_S5PC100
+	default 3 if ARCH_S5PC100
 	default 2
 	depends on ARM_VIC
 	help
@@ -17,9 +29,6 @@ config ARM_VIC_NR
 config ICST
 	bool
 
-config PL330
-	bool
-
 config SA1111
 	bool
 	select DMABOUNCE if !ARCH_PXA
@@ -27,9 +36,6 @@ config SA1111
 config DMABOUNCE
 	bool
 	select ZONE_DMA
-
-config TIMER_ACORN
-	bool
 
 config SHARP_LOCOMO
 	bool
@@ -48,12 +54,11 @@ config FIQ_DEBUGGER
 	bool "FIQ Mode Serial Debugger"
 	select FIQ
 	select FIQ_GLUE
-	select KERNEL_DEBUGGER_CORE
 	default n
 	help
 	  The FIQ serial debugger can accept commands even when the
 	  kernel is unresponsive due to being stuck with interrupts
-	  disabled.  Depends on the kernel debugger core in drivers/misc.
+	  disabled.
 
 
 config FIQ_DEBUGGER_NO_SLEEP

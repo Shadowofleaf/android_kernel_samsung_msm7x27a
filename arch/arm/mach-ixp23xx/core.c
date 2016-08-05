@@ -34,9 +34,9 @@
 #include <asm/memory.h>
 #include <mach/hardware.h>
 #include <asm/irq.h>
-#include <asm/system.h>
 #include <asm/tlbflush.h>
 #include <asm/pgtable.h>
+#include <asm/system_misc.h>
 
 #include <asm/mach/map.h>
 #include <asm/mach/time.h>
@@ -289,12 +289,12 @@ static void ixp23xx_config_irq(unsigned int irq, enum ixp23xx_irq_type type)
 {
 	switch (type) {
 	case IXP23XX_IRQ_LEVEL:
-		set_irq_chip(irq, &ixp23xx_irq_level_chip);
-		set_irq_handler(irq, handle_level_irq);
+		irq_set_chip_and_handler(irq, &ixp23xx_irq_level_chip,
+					 handle_level_irq);
 		break;
 	case IXP23XX_IRQ_EDGE:
-		set_irq_chip(irq, &ixp23xx_irq_edge_chip);
-		set_irq_handler(irq, handle_edge_irq);
+		irq_set_chip_and_handler(irq, &ixp23xx_irq_edge_chip,
+					 handle_edge_irq);
 		break;
 	}
 	set_irq_flags(irq, IRQF_VALID);
@@ -324,12 +324,12 @@ void __init ixp23xx_init_irq(void)
 	}
 
 	for (irq = IRQ_IXP23XX_INTA; irq <= IRQ_IXP23XX_INTB; irq++) {
-		set_irq_chip(irq, &ixp23xx_pci_irq_chip);
-		set_irq_handler(irq, handle_level_irq);
+		irq_set_chip_and_handler(irq, &ixp23xx_pci_irq_chip,
+					 handle_level_irq);
 		set_irq_flags(irq, IRQF_VALID);
 	}
 
-	set_irq_chained_handler(IRQ_IXP23XX_PCI_INT_RPH, pci_handler);
+	irq_set_chained_handler(IRQ_IXP23XX_PCI_INT_RPH, pci_handler);
 }
 
 
@@ -441,6 +441,15 @@ static struct platform_device *ixp23xx_devices[] __initdata = {
 
 void __init ixp23xx_sys_init(void)
 {
+	/* by default, the idle code is disabled */
+	disable_hlt();
+
 	*IXP23XX_EXP_UNIT_FUSE |= 0xf;
 	platform_add_devices(ixp23xx_devices, ARRAY_SIZE(ixp23xx_devices));
+}
+
+void ixp23xx_restart(char mode, const char *cmd)
+{
+	/* Use on-chip reset capability */
+	*IXP23XX_RESET0 |= IXP23XX_RST_ALL;
 }

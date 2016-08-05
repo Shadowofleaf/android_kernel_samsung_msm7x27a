@@ -183,15 +183,12 @@ struct nfs4_acl {
 
 typedef struct { char data[NFS4_VERIFIER_SIZE]; } nfs4_verifier;
 
-struct nfs41_stateid {
+struct nfs_stateid4 {
 	__be32 seqid;
 	char other[NFS4_STATEID_OTHER_SIZE];
 } __attribute__ ((packed));
 
-typedef union {
-	char data[NFS4_STATEID_SIZE];
-	struct nfs41_stateid stateid;
-} nfs4_stateid;
+typedef struct nfs_stateid4 nfs4_stateid;
 
 enum nfs_opnum4 {
 	OP_ACCESS = 3,
@@ -359,7 +356,7 @@ enum nfsstat4 {
 						/* Error 10073 is unused. */
 	NFS4ERR_CLIENTID_BUSY	= 10074,	/* clientid has state */
 	NFS4ERR_PNFS_IO_HOLE	= 10075,	/* IO to _SPARSE file hole */
-	NFS4ERR_SEQ_FALSE_RETRY	= 10076,	/* retry not origional */
+	NFS4ERR_SEQ_FALSE_RETRY	= 10076,	/* retry not original */
 	NFS4ERR_BAD_HIGH_SLOT	= 10077,	/* sequence arg bad */
 	NFS4ERR_DEADSESSION	= 10078,	/* persistent session dead */
 	NFS4ERR_ENCR_ALG_UNSUPP = 10079,	/* SSV alg mismatch */
@@ -372,6 +369,22 @@ enum nfsstat4 {
 	NFS4ERR_RETURNCONFLICT	= 10086,	/* outstanding layoutreturn */
 	NFS4ERR_DELEG_REVOKED	= 10087,	/* deleg./layout revoked */
 };
+
+static inline bool seqid_mutating_err(u32 err)
+{
+	/* rfc 3530 section 8.1.5: */
+	switch (err) {
+	case NFS4ERR_STALE_CLIENTID:
+	case NFS4ERR_STALE_STATEID:
+	case NFS4ERR_BAD_STATEID:
+	case NFS4ERR_BAD_SEQID:
+	case NFS4ERR_BADXDR:
+	case NFS4ERR_RESOURCE:
+	case NFS4ERR_NOFILEHANDLE:
+		return false;
+	};
+	return true;
+}
 
 /*
  * Note: NF4BAD is not actually part of the protocol; it is just used
@@ -394,7 +407,10 @@ enum open_claim_type4 {
 	NFS4_OPEN_CLAIM_NULL = 0,
 	NFS4_OPEN_CLAIM_PREVIOUS = 1,
 	NFS4_OPEN_CLAIM_DELEGATE_CUR = 2,
-	NFS4_OPEN_CLAIM_DELEGATE_PREV = 3
+	NFS4_OPEN_CLAIM_DELEGATE_PREV = 3,
+	NFS4_OPEN_CLAIM_FH = 4, /* 4.1 */
+	NFS4_OPEN_CLAIM_DELEG_CUR_FH = 5, /* 4.1 */
+	NFS4_OPEN_CLAIM_DELEG_PREV_FH = 6, /* 4.1 */
 };
 
 enum opentype4 {
@@ -422,7 +438,20 @@ enum limit_by4 {
 enum open_delegation_type4 {
 	NFS4_OPEN_DELEGATE_NONE = 0,
 	NFS4_OPEN_DELEGATE_READ = 1,
-	NFS4_OPEN_DELEGATE_WRITE = 2
+	NFS4_OPEN_DELEGATE_WRITE = 2,
+	NFS4_OPEN_DELEGATE_NONE_EXT = 3, /* 4.1 */
+};
+
+enum why_no_delegation4 { /* new to v4.1 */
+	WND4_NOT_WANTED = 0,
+	WND4_CONTENTION = 1,
+	WND4_RESOURCE = 2,
+	WND4_NOT_SUPP_FTYPE = 3,
+	WND4_WRITE_DELEG_NOT_SUPP_FTYPE = 4,
+	WND4_NOT_SUPP_UPGRADE = 5,
+	WND4_NOT_SUPP_DOWNGRADE = 6,
+	WND4_CANCELLED = 7,
+	WND4_IS_DIR = 8,
 };
 
 enum lock_type4 {
@@ -550,6 +579,7 @@ enum {
 	NFSPROC4_CLNT_SETACL,
 	NFSPROC4_CLNT_FS_LOCATIONS,
 	NFSPROC4_CLNT_RELEASE_LOCKOWNER,
+	NFSPROC4_CLNT_SECINFO,
 
 	/* nfs41 */
 	NFSPROC4_CLNT_EXCHANGE_ID,
@@ -560,6 +590,12 @@ enum {
 	NFSPROC4_CLNT_RECLAIM_COMPLETE,
 	NFSPROC4_CLNT_LAYOUTGET,
 	NFSPROC4_CLNT_GETDEVICEINFO,
+	NFSPROC4_CLNT_LAYOUTCOMMIT,
+	NFSPROC4_CLNT_LAYOUTRETURN,
+	NFSPROC4_CLNT_SECINFO_NO_NAME,
+	NFSPROC4_CLNT_TEST_STATEID,
+	NFSPROC4_CLNT_FREE_STATEID,
+	NFSPROC4_CLNT_GETDEVICELIST,
 };
 
 /* nfs41 types */
@@ -568,9 +604,11 @@ struct nfs4_sessionid {
 };
 
 /* Create Session Flags */
-#define SESSION4_PERSIST	 0x001
-#define SESSION4_BACK_CHAN 	 0x002
-#define SESSION4_RDMA		 0x004
+#define SESSION4_PERSIST	0x001
+#define SESSION4_BACK_CHAN	0x002
+#define SESSION4_RDMA		0x004
+
+#define SESSION4_FLAG_MASK_A	0x007
 
 enum state_protect_how4 {
 	SP4_NONE	= 0,

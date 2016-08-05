@@ -119,10 +119,10 @@ static int me4000_attach(struct comedi_device *dev,
 			 struct comedi_devconfig *it);
 static int me4000_detach(struct comedi_device *dev);
 static struct comedi_driver driver_me4000 = {
-driver_name: "me4000",
-module : THIS_MODULE,
-attach : me4000_attach,
-detach : me4000_detach,
+	.driver_name = "me4000",
+	.module = THIS_MODULE,
+	.attach = me4000_attach,
+	.detach = me4000_detach,
 };
 
 /*-----------------------------------------------------------------------------
@@ -1810,7 +1810,7 @@ static irqreturn_t me4000_ai_isr(int irq, void *dev_id)
 		       ai_context->irq_status_reg) &
 	    ME4000_IRQ_STATUS_BIT_AI_HF) {
 		ISR_PDEBUG
-		    ("me4000_ai_isr(): Fifo half full interrupt occured\n");
+		    ("me4000_ai_isr(): Fifo half full interrupt occurred\n");
 
 		/* Read status register to find out what happened */
 		tmp = me4000_inl(dev, ai_context->ctrl_reg);
@@ -1903,7 +1903,7 @@ static irqreturn_t me4000_ai_isr(int irq, void *dev_id)
 	if (me4000_inl(dev,
 		       ai_context->irq_status_reg) & ME4000_IRQ_STATUS_BIT_SC) {
 		ISR_PDEBUG
-		    ("me4000_ai_isr(): Sample counter interrupt occured\n");
+		    ("me4000_ai_isr(): Sample counter interrupt occurred\n");
 
 		s->async->events |= COMEDI_CB_BLOCK | COMEDI_CB_EOA;
 
@@ -2098,23 +2098,29 @@ static int me4000_dio_insn_config(struct comedi_device *dev,
 
 	CALL_PDEBUG("In me4000_dio_insn_config()\n");
 
-	if (data[0] == INSN_CONFIG_DIO_QUERY) {
+	switch (data[0]) {
+	default:
+		return -EINVAL;
+	case INSN_CONFIG_DIO_QUERY:
 		data[1] =
 		    (s->io_bits & (1 << chan)) ? COMEDI_OUTPUT : COMEDI_INPUT;
 		return insn->n;
+	case INSN_CONFIG_DIO_INPUT:
+	case INSN_CONFIG_DIO_OUTPUT:
+		break;
 	}
 
 	/*
 	 * The input or output configuration of each digital line is
 	 * configured by a special insn_config instruction.  chanspec
 	 * contains the channel to be changed, and data[0] contains the
-	 * value COMEDI_INPUT or COMEDI_OUTPUT.
+	 * value INSN_CONFIG_DIO_INPUT or INSN_CONFIG_DIO_OUTPUT.
 	 * On the ME-4000 it is only possible to switch port wise (8 bit)
 	 */
 
 	tmp = me4000_inl(dev, info->dio_context.ctrl_reg);
 
-	if (data[0] == COMEDI_OUTPUT) {
+	if (data[0] == INSN_CONFIG_DIO_OUTPUT) {
 		if (chan < 8) {
 			s->io_bits |= 0xFF;
 			tmp &= ~(ME4000_DIO_CTRL_BIT_MODE_0 |

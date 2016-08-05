@@ -19,7 +19,6 @@
 #include <asm/cpu-info.h>
 #include <asm/mipsregs.h>
 #include <asm/prefetch.h>
-#include <asm/system.h>
 
 /*
  * Return current * instruction pointer ("program counter").
@@ -337,7 +336,7 @@ unsigned long get_wchan(struct task_struct *p);
 /*
  * Return_address is a replacement for __builtin_return_address(count)
  * which on certain architectures cannot reasonably be implemented in GCC
- * (MIPS, Alpha) or is unuseable with -fomit-frame-pointer (i386).
+ * (MIPS, Alpha) or is unusable with -fomit-frame-pointer (i386).
  * Note that __builtin_return_address(x>=1) is forbidden because GCC
  * aborts compilation on some CPUs.  It's simply not possible to unwind
  * some CPU's stackframes.
@@ -355,6 +354,12 @@ unsigned long get_wchan(struct task_struct *p);
 
 #define ARCH_HAS_PREFETCHW
 #define prefetchw(x) __builtin_prefetch((x), 1, 1)
+
+/*
+ * See Documentation/scheduler/sched-arch.txt; prevents deadlock on SMP
+ * systems.
+ */
+#define __ARCH_WANT_UNLOCKED_CTXSW
 
 #endif
 

@@ -527,7 +527,7 @@ static void dt9812_configure_gain(struct usb_dt9812 *dev,
 		 * 11x -> Gain =  0.5
 		 */
 	case DT9812_GAIN_0PT5:
-		rmw->or_value = F020_MASK_ADC0CF_AMP0GN2 ||
+		rmw->or_value = F020_MASK_ADC0CF_AMP0GN2 |
 		    F020_MASK_ADC0CF_AMP0GN1;
 		break;
 	case DT9812_GAIN_1:
@@ -540,7 +540,7 @@ static void dt9812_configure_gain(struct usb_dt9812 *dev,
 		rmw->or_value = F020_MASK_ADC0CF_AMP0GN1;
 		break;
 	case DT9812_GAIN_8:
-		rmw->or_value = F020_MASK_ADC0CF_AMP0GN1 ||
+		rmw->or_value = F020_MASK_ADC0CF_AMP0GN1 |
 		    F020_MASK_ADC0CF_AMP0GN0;
 		break;
 	case DT9812_GAIN_16:
@@ -773,7 +773,7 @@ static int dt9812_probe(struct usb_interface *interface,
 			retval = dt9812_read_info(dev, 1, &fw, sizeof(fw));
 			if (retval == 0) {
 				dev_info(&interface->dev,
-					 "usb_reset_configuration succeded "
+					 "usb_reset_configuration succeeded "
 					 "after %d iterations\n", i);
 				break;
 			}

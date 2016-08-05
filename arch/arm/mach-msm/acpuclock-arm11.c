@@ -30,8 +30,8 @@
 #include <linux/io.h>
 #include <mach/board.h>
 #include <mach/msm_iomap.h>
+#include <mach/proc_comm.h>
 
-#include "proc_comm.h"
 #include "acpuclock.h"
 
 
@@ -344,7 +344,7 @@ int acpuclk_set_rate(unsigned long rate, int for_power_collapse)
 		}
 	}
 
-	/* Set wait states for CPU inbetween frequency changes */
+	/* Set wait states for CPU between frequency changes */
 	reg_clkctl = readl(A11S_CLK_CNTL_ADDR);
 	reg_clkctl |= (100 << 16); /* set WT_ST_CNT */
 	writel(reg_clkctl, A11S_CLK_CNTL_ADDR);

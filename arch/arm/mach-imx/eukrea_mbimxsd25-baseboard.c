@@ -22,7 +22,6 @@
 #include <linux/gpio.h>
 #include <linux/leds.h>
 #include <linux/platform_device.h>
-#include <linux/gpio_keys.h>
 #include <linux/input.h>
 #include <video/platform_lcd.h>
 
@@ -32,8 +31,6 @@
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 #include <mach/mx25.h>
-#include <mach/imx-uart.h>
-#include <mach/audmux.h>
 
 #include "devices-imx25.h"
 
@@ -175,7 +172,7 @@ static struct platform_device eukrea_mbimxsd_lcd_powerdev = {
 	.dev.platform_data	= &eukrea_mbimxsd_lcd_power_data,
 };
 
-static struct gpio_led eukrea_mbimxsd_leds[] = {
+static const struct gpio_led eukrea_mbimxsd_leds[] __initconst = {
 	{
 		.name			= "led1",
 		.default_trigger	= "heartbeat",
@@ -184,17 +181,10 @@ static struct gpio_led eukrea_mbimxsd_leds[] = {
 	},
 };
 
-static struct gpio_led_platform_data eukrea_mbimxsd_led_info = {
+static const struct gpio_led_platform_data
+		eukrea_mbimxsd_led_info __initconst = {
 	.leds		= eukrea_mbimxsd_leds,
 	.num_leds	= ARRAY_SIZE(eukrea_mbimxsd_leds),
-};
-
-static struct platform_device eukrea_mbimxsd_leds_gpio = {
-	.name	= "leds-gpio",
-	.id	= -1,
-	.dev	= {
-		.platform_data	= &eukrea_mbimxsd_led_info,
-	},
 };
 
 static struct gpio_keys_button eukrea_mbimxsd_gpio_buttons[] = {
@@ -207,23 +197,13 @@ static struct gpio_keys_button eukrea_mbimxsd_gpio_buttons[] = {
 	},
 };
 
-static struct gpio_keys_platform_data eukrea_mbimxsd_button_data = {
+static const struct gpio_keys_platform_data
+		eukrea_mbimxsd_button_data __initconst = {
 	.buttons	= eukrea_mbimxsd_gpio_buttons,
 	.nbuttons	= ARRAY_SIZE(eukrea_mbimxsd_gpio_buttons),
 };
 
-static struct platform_device eukrea_mbimxsd_button_device = {
-	.name		= "gpio-keys",
-	.id		= -1,
-	.num_resources	= 0,
-	.dev		= {
-		.platform_data	= &eukrea_mbimxsd_button_data,
-	}
-};
-
 static struct platform_device *platform_devices[] __initdata = {
-	&eukrea_mbimxsd_leds_gpio,
-	&eukrea_mbimxsd_button_device,
 	&eukrea_mbimxsd_lcd_powerdev,
 };
 
@@ -242,6 +222,12 @@ struct imx_ssi_platform_data eukrea_mbimxsd_ssi_pdata __initconst = {
 	.flags = IMX_SSI_SYN | IMX_SSI_NET | IMX_SSI_USE_I2S_SLAVE,
 };
 
+static struct esdhc_platform_data sd1_pdata = {
+	.cd_gpio = GPIO_SD1CD,
+	.cd_type = ESDHC_CD_GPIO,
+	.wp_type = ESDHC_WP_NONE,
+};
+
 /*
  * system init for baseboard usage. Will be called by cpuimx25 init.
  *
@@ -254,28 +240,12 @@ void __init eukrea_mbimxsd25_baseboard_init(void)
 			ARRAY_SIZE(eukrea_mbimxsd_pads)))
 		printk(KERN_ERR "error setting mbimxsd pads !\n");
 
-#if defined(CONFIG_SND_SOC_EUKREA_TLV320)
-	/* SSI unit master I2S codec connected to SSI_AUD5*/
-	mxc_audmux_v2_configure_port(0,
-			MXC_AUDMUX_V2_PTCR_SYN |
-			MXC_AUDMUX_V2_PTCR_TFSDIR |
-			MXC_AUDMUX_V2_PTCR_TFSEL(4) |
-			MXC_AUDMUX_V2_PTCR_TCLKDIR |
-			MXC_AUDMUX_V2_PTCR_TCSEL(4),
-			MXC_AUDMUX_V2_PDCR_RXDSEL(4)
-	);
-	mxc_audmux_v2_configure_port(4,
-			MXC_AUDMUX_V2_PTCR_SYN,
-			MXC_AUDMUX_V2_PDCR_RXDSEL(0)
-	);
-#endif
-
 	imx25_add_imx_uart1(&uart_pdata);
 	imx25_add_imx_fb(&eukrea_mximxsd_fb_pdata);
 	imx25_add_imx_ssi(0, &eukrea_mbimxsd_ssi_pdata);
 
 	imx25_add_flexcan1(NULL);
-	imx25_add_sdhci_esdhc_imx(0, NULL);
+	imx25_add_sdhci_esdhc_imx(0, &sd1_pdata);
 
 	gpio_request(GPIO_LED1, "LED1");
 	gpio_direction_output(GPIO_LED1, 1);
@@ -293,4 +263,6 @@ void __init eukrea_mbimxsd25_baseboard_init(void)
 				ARRAY_SIZE(eukrea_mbimxsd_i2c_devices));
 
 	platform_add_devices(platform_devices, ARRAY_SIZE(platform_devices));
+	gpio_led_register_device(-1, &eukrea_mbimxsd_led_info);
+	imx_add_gpio_keys(&eukrea_mbimxsd_button_data);
 }

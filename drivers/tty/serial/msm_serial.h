@@ -1,8 +1,7 @@
 /*
- * drivers/serial/msm_serial.h
- *
  * Copyright (C) 2007 Google, Inc.
  * Author: Robert Love <rlove@google.com>
+ * Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -57,6 +56,7 @@
 #define UART_CSR_75	0x00
 
 #define UART_TF		0x000C
+#define UARTDM_TF	0x0070
 
 #define UART_CR				0x0010
 #define UART_CR_CMD_NULL		(0 << 4)
@@ -67,14 +67,17 @@
 #define UART_CR_CMD_START_BREAK		(5 << 4)
 #define UART_CR_CMD_STOP_BREAK		(6 << 4)
 #define UART_CR_CMD_RESET_CTS		(7 << 4)
+#define UART_CR_CMD_RESET_STALE_INT	(8 << 4)
 #define UART_CR_CMD_PACKET_MODE		(9 << 4)
 #define UART_CR_CMD_MODE_RESET		(12 << 4)
 #define UART_CR_CMD_SET_RFR		(13 << 4)
 #define UART_CR_CMD_RESET_RFR		(14 << 4)
+#define UART_CR_CMD_PROTECTION_EN	(16 << 4)
+#define UART_CR_CMD_STALE_EVENT_ENABLE	(80 << 4)
 #define UART_CR_TX_DISABLE		(1 << 3)
-#define UART_CR_TX_ENABLE		(1 << 3)
-#define UART_CR_RX_DISABLE		(1 << 3)
-#define UART_CR_RX_ENABLE		(1 << 3)
+#define UART_CR_TX_ENABLE		(1 << 2)
+#define UART_CR_RX_DISABLE		(1 << 1)
+#define UART_CR_RX_ENABLE		(1 << 0)
 
 #define UART_IMR		0x0014
 #define UART_IMR_TXLEV		(1 << 0)
@@ -97,6 +100,17 @@
 #define UART_DREG		0x0030
 #define UART_MNDREG		0x0034
 #define UART_IRDA		0x0038
+
+#define UART_SIM_CFG			0x003c
+#define UART_SIM_CFG_UIM_TX_MODE	(1 << 17)
+#define UART_SIM_CFG_UIM_RX_MODE	(1 << 16)
+#define UART_SIM_CFG_STOP_BIT_LEN_N(n)	((n) << 8)
+#define UART_SIM_CFG_SIM_CLK_ON		(1 << 7)
+#define UART_SIM_CFG_SIM_CLK_TD8_SEL	(1 << 6)
+#define UART_SIM_CFG_SIM_CLK_STOP_HIGH	(1 << 5)
+#define UART_SIM_CFG_MASK_RX		(1 << 3)
+#define UART_SIM_CFG_SIM_SEL		(1 << 0)
+
 #define UART_MISR_MODE		0x0040
 #define UART_MISR_RESET		0x0044
 #define UART_MISR_EXPORT	0x0048
@@ -113,8 +127,19 @@
 #define UART_SR_RX_FULL		(1 << 1)
 #define UART_SR_RX_READY	(1 << 0)
 
-#define UART_RF		0x000C
-#define UART_MISR	0x0010
-#define UART_ISR	0x0014
+#define UART_RF			0x000C
+#define UARTDM_RF		0x0070
+#define UART_MISR		0x0010
+#define UART_ISR		0x0014
+#define UART_ISR_TX_READY	(1 << 7)
+
+#define GSBI_CONTROL		0x0
+#define GSBI_PROTOCOL_CODE	0x30
+#define GSBI_PROTOCOL_UART	0x40
+#define GSBI_PROTOCOL_IDLE	0x0
+
+#define UARTDM_DMRX		0x34
+#define UARTDM_NCF_TX		0x40
+#define UARTDM_RX_TOTAL_SNAP	0x38
 
 #endif	/* __DRIVERS_SERIAL_MSM_SERIAL_H */

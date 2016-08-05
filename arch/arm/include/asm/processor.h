@@ -31,19 +31,7 @@
 
 extern unsigned int boot_reason;
 
-union debug_insn {
-	u32	arm;
-	u16	thumb;
-};
-
-struct debug_entry {
-	u32			address;
-	union debug_insn	insn;
-};
-
 struct debug_info {
-	int			nsaved;
-	struct debug_entry	bp[2];
 #ifdef CONFIG_HAVE_HW_BREAKPOINT
 	struct perf_event	*hbp[ARM_MAX_HBP_SLOTS];
 #endif
@@ -68,8 +56,6 @@ struct thread_struct {
 
 #define start_thread(regs,pc,sp)					\
 ({									\
-	unsigned long *stack = (unsigned long *)sp;			\
-	set_fs(USER_DS);						\
 	memset(regs->uregs, 0, sizeof(regs->uregs));			\
 	if (current->personality & ADDR_LIMIT_32BIT)			\
 		regs->ARM_cpsr = USR_MODE;				\
@@ -80,9 +66,6 @@ struct thread_struct {
 	regs->ARM_cpsr |= PSR_ENDSTATE;					\
 	regs->ARM_pc = pc & ~1;		/* pc */			\
 	regs->ARM_sp = sp;		/* sp */			\
-	regs->ARM_r2 = stack[2];	/* r2 (envp) */			\
-	regs->ARM_r1 = stack[1];	/* r1 (argv) */			\
-	regs->ARM_r0 = stack[0];	/* r0 (argc) */			\
 	nommu_start_thread(regs);					\
 })
 
@@ -97,11 +80,13 @@ extern void release_thread(struct task_struct *);
 
 unsigned long get_wchan(struct task_struct *p);
 
-#if __LINUX_ARM_ARCH__ == 6
+#if __LINUX_ARM_ARCH__ == 6 || defined(CONFIG_ARM_ERRATA_754327)
 #define cpu_relax()			smp_mb()
 #else
 #define cpu_relax()			barrier()
 #endif
+
+void cpu_idle_wait(void);
 
 /*
  * Create a new kernel thread
@@ -136,6 +121,8 @@ static inline void prefetch(const void *ptr)
 #define spin_lock_prefetch(x) do { } while (0)
 
 #endif
+
+#define HAVE_ARCH_PICK_MMAP_LAYOUT
 
 #endif
 

@@ -78,7 +78,7 @@ static UCHAR ReadEEPROMStatusRegister( PMINI_ADAPTER Adapter )
 	{
 		value=0;
 		uiStatus = 0 ;
-		rdmalt( Adapter, EEPROM_SPI_Q_STATUS1_REG,&uiStatus, sizeof(uiStatus));
+		rdmalt(Adapter, EEPROM_SPI_Q_STATUS1_REG, &uiStatus, sizeof(uiStatus));
 		if(Adapter->device_removed == TRUE)
 		{
 			BCM_DEBUG_PRINT(Adapter,DBG_TYPE_PRINTK, 0, 0,"Modem has got removed hence exiting....");
@@ -93,7 +93,7 @@ static UCHAR ReadEEPROMStatusRegister( PMINI_ADAPTER Adapter )
 			wrmalt( Adapter, EEPROM_SPI_Q_STATUS1_REG, &value, sizeof(value));
 
 			value =0;
-			rdmalt(Adapter, EEPROM_READ_DATAQ_REG,&value, sizeof(value));
+			rdmalt(Adapter, EEPROM_READ_DATAQ_REG, &value, sizeof(value));
 			uiData = (UCHAR)value;
 
 			break;
@@ -102,8 +102,8 @@ static UCHAR ReadEEPROMStatusRegister( PMINI_ADAPTER Adapter )
 		dwRetries-- ;
 		if ( dwRetries == 0 )
 		{
-			 rdmalt(Adapter, EEPROM_SPI_Q_STATUS1_REG,&value, sizeof(value));
-			 rdmalt(Adapter, EEPROM_SPI_Q_STATUS_REG,&value1, sizeof(value1));
+			 rdmalt(Adapter, EEPROM_SPI_Q_STATUS1_REG, &value, sizeof(value));
+			 rdmalt(Adapter, EEPROM_SPI_Q_STATUS_REG, &value1, sizeof(value1));
 			 BCM_DEBUG_PRINT(Adapter,DBG_TYPE_PRINTK, 0, 0,"0x3004 = %x 0x3008 = %x, retries = %d failed.\n",value,value1,  MAX_EEPROM_RETRIES*RETRIES_PER_DELAY);
 			return uiData;
 		}
@@ -158,7 +158,7 @@ INT ReadBeceemEEPROMBulk( PMINI_ADAPTER Adapter,
 		{
 
 		uiStatus = 0;
-		rdmalt( Adapter, EEPROM_SPI_Q_STATUS1_REG, &uiStatus, sizeof(uiStatus));
+		rdmalt(Adapter, EEPROM_SPI_Q_STATUS1_REG, &uiStatus, sizeof(uiStatus));
 		if(Adapter->device_removed == TRUE)
 		{
 			BCM_DEBUG_PRINT(Adapter,DBG_TYPE_PRINTK, 0, 0,"Modem has got Removed.hence exiting from loop...");
@@ -202,8 +202,8 @@ INT ReadBeceemEEPROMBulk( PMINI_ADAPTER Adapter,
 		{
 			value=0;
 			value1=0;
-			rdmalt(Adapter, EEPROM_SPI_Q_STATUS1_REG,&value, sizeof(value));
-			rdmalt(Adapter, EEPROM_SPI_Q_STATUS_REG,&value1, sizeof(value1));
+			rdmalt(Adapter, EEPROM_SPI_Q_STATUS1_REG, &value, sizeof(value));
+			rdmalt(Adapter, EEPROM_SPI_Q_STATUS_REG, &value1, sizeof(value1));
 			BCM_DEBUG_PRINT(Adapter,DBG_TYPE_PRINTK, 0, 0, "dwNumWords %d 0x3004 = %x 0x3008 = %x  retries = %d failed.\n", dwNumWords, value,  value1,  MAX_EEPROM_RETRIES*RETRIES_PER_DELAY);
 			return STATUS_FAILURE;
 		}
@@ -217,22 +217,22 @@ INT ReadBeceemEEPROMBulk( PMINI_ADAPTER Adapter,
 		pvalue = (PUCHAR)(pdwData + dwIndex);
 
 		value =0;
-		rdmalt(Adapter, EEPROM_READ_DATAQ_REG,&value, sizeof(value));
+		rdmalt(Adapter, EEPROM_READ_DATAQ_REG, &value, sizeof(value));
 
 		pvalue[0] = value;
 
 		value = 0;
-		rdmalt(Adapter, EEPROM_READ_DATAQ_REG,&value, sizeof(value));
+		rdmalt(Adapter, EEPROM_READ_DATAQ_REG, &value, sizeof(value));
 
 		pvalue[1] = value;
 
 		value =0;
-		rdmalt(Adapter, EEPROM_READ_DATAQ_REG,&value, sizeof(value));
+		rdmalt(Adapter, EEPROM_READ_DATAQ_REG, &value, sizeof(value));
 
 		pvalue[2] = value;
 
 		value = 0;
-		rdmalt(Adapter, EEPROM_READ_DATAQ_REG,&value, sizeof(value));
+		rdmalt(Adapter, EEPROM_READ_DATAQ_REG, &value, sizeof(value));
 
 		pvalue[3] = value;
 	}
@@ -313,7 +313,7 @@ INT ReadMacAddressFromNVM(PMINI_ADAPTER Adapter)
 //		uiNumBytes - Number of bytes to be read from the EEPROM.
 //
 // Returns:
-//		OSAL_STATUS_SUCCESS - if EEPROM read is successfull.
+//		OSAL_STATUS_SUCCESS - if EEPROM read is successful.
 //		<FAILURE>			- if failed.
 //-----------------------------------------------------------------------------
 
@@ -431,7 +431,7 @@ INT BeceemEEPROMBulkRead(
 //		uiNumBytes - Number of bytes to be read from the FLASH.
 //
 // Returns:
-//		OSAL_STATUS_SUCCESS - if FLASH read is successfull.
+//		OSAL_STATUS_SUCCESS - if FLASH read is successful.
 //		<FAILURE>			- if failed.
 //-----------------------------------------------------------------------------
 
@@ -445,6 +445,7 @@ static INT BeceemFlashBulkRead(
 	UINT uiBytesToRead = uiNumBytes;
 	INT Status = 0;
 	UINT uiPartOffset = 0;
+	int bytes;
 
 	if(Adapter->device_removed )
 	{
@@ -469,9 +470,9 @@ static INT BeceemFlashBulkRead(
 		uiBytesToRead = MAX_RW_SIZE - (uiOffset%MAX_RW_SIZE);
 		uiBytesToRead = MIN(uiNumBytes,uiBytesToRead);
 
-		if(rdm(Adapter,uiPartOffset, (PCHAR)pBuffer+uiIndex,uiBytesToRead))
-		{
-			Status = -1;
+		bytes = rdm(Adapter, uiPartOffset, (PCHAR)pBuffer+uiIndex, uiBytesToRead);
+		if (bytes < 0) {
+			Status = bytes;
 			Adapter->SelectedChip = RESET_CHIP_SELECT;
 			return Status;
 		}
@@ -488,9 +489,9 @@ static INT BeceemFlashBulkRead(
 
 		uiBytesToRead = MIN(uiNumBytes,MAX_RW_SIZE);
 
-		if(rdm(Adapter,uiPartOffset, (PCHAR)pBuffer+uiIndex,uiBytesToRead))
-		{
-			Status = -1;
+		bytes = rdm(Adapter, uiPartOffset, (PCHAR)pBuffer+uiIndex, uiBytesToRead);
+		if (bytes < 0) {
+			Status = bytes;
 			break;
 		}
 
@@ -613,6 +614,7 @@ static INT FlashSectorErase(PMINI_ADAPTER Adapter,
 	UINT iIndex = 0, iRetries = 0;
 	UINT uiStatus = 0;
 	UINT value;
+	int bytes;
 
 	for(iIndex=0;iIndex<numOfSectors;iIndex++)
 	{
@@ -632,10 +634,11 @@ static INT FlashSectorErase(PMINI_ADAPTER Adapter,
 				return STATUS_FAILURE;
 			}
 
-			if(rdmalt(Adapter, FLASH_SPI_READQ_REG, &uiStatus, sizeof(uiStatus)) < 0 )
-			{
-				BCM_DEBUG_PRINT(Adapter,DBG_TYPE_PRINTK, 0, 0,"Reading status of FLASH_SPI_READQ_REG fails");
-				return STATUS_FAILURE;
+			bytes = rdmalt(Adapter, FLASH_SPI_READQ_REG, &uiStatus, sizeof(uiStatus));
+			if (bytes < 0) {
+				uiStatus = bytes;
+				BCM_DEBUG_PRINT(Adapter, DBG_TYPE_PRINTK, 0, 0, "Reading status of FLASH_SPI_READQ_REG fails");
+				return uiStatus;
 			}
 			iRetries++;
 			//After every try lets make the CPU free for 10 ms. generally time taken by the
@@ -679,6 +682,7 @@ static INT flashByteWrite(
 
 	UINT value;
 	ULONG ulData = *(PUCHAR)pData;
+	int bytes;
 
 //
 // need not write 0xFF because write requires an erase and erase will
@@ -720,10 +724,11 @@ static INT flashByteWrite(
 			return STATUS_FAILURE;
 	  	}
 	  	//__udelay(1);
-	  	if(rdmalt(Adapter, FLASH_SPI_READQ_REG, &uiStatus, sizeof(uiStatus)) < 0)
-	  	{
-	  		BCM_DEBUG_PRINT(Adapter,DBG_TYPE_PRINTK, 0, 0,"Reading status of FLASH_SPI_READQ_REG fails");
-			return STATUS_FAILURE;
+		bytes = rdmalt(Adapter, FLASH_SPI_READQ_REG, &uiStatus, sizeof(uiStatus));
+		if (bytes < 0) {
+			uiStatus = bytes;
+			BCM_DEBUG_PRINT(Adapter, DBG_TYPE_PRINTK, 0, 0, "Reading status of FLASH_SPI_READQ_REG fails");
+			return uiStatus;
 		}
 	  	iRetries--;
 		if( iRetries && ((iRetries % FLASH_PER_RETRIES_DELAY) == 0))
@@ -771,6 +776,7 @@ static INT flashWrite(
 
 	UINT value;
 	UINT uiErasePattern[4] = {0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF};
+	int bytes;
 //
 // need not write 0xFFFFFFFF because write requires an erase and erase will
 // make whole sector 0xFFFFFFFF.
@@ -803,10 +809,11 @@ static INT flashWrite(
 			return STATUS_FAILURE;
 	  	}
 	  	//__udelay(1);
-	  	if(rdmalt(Adapter, FLASH_SPI_READQ_REG, &uiStatus, sizeof(uiStatus)) < 0 )
-	  	{
-	  		BCM_DEBUG_PRINT(Adapter,DBG_TYPE_PRINTK, 0, 0,"Reading status of FLASH_SPI_READQ_REG fails");
-			return STATUS_FAILURE;
+		bytes = rdmalt(Adapter, FLASH_SPI_READQ_REG, &uiStatus, sizeof(uiStatus));
+		if (bytes < 0) {
+			uiStatus = bytes;
+			BCM_DEBUG_PRINT(Adapter, DBG_TYPE_PRINTK, 0, 0, "Reading status of FLASH_SPI_READQ_REG fails");
+			return uiStatus;
 		}
 
 		iRetries--;
@@ -849,6 +856,7 @@ static INT flashByteWriteStatus(
 	INT  iRetries = MAX_FLASH_RETRIES * FLASH_PER_RETRIES_DELAY; //3
 	ULONG ulData  = *(PUCHAR)pData;
 	UINT value;
+	int bytes;
 
 //
 // need not write 0xFFFFFFFF because write requires an erase and erase will
@@ -891,10 +899,11 @@ static INT flashByteWriteStatus(
 			return STATUS_FAILURE;
 		}
 		//__udelay(1);
-		if(rdmalt(Adapter, FLASH_SPI_READQ_REG, &uiStatus, sizeof(uiStatus)) < 0)
-		{
-			BCM_DEBUG_PRINT(Adapter,DBG_TYPE_PRINTK, 0, 0,"Reading status of FLASH_SPI_READQ_REG fails");
-			return STATUS_FAILURE;
+		bytes = rdmalt(Adapter, FLASH_SPI_READQ_REG, &uiStatus, sizeof(uiStatus));
+		if (bytes < 0) {
+			uiStatus = bytes;
+			BCM_DEBUG_PRINT(Adapter, DBG_TYPE_PRINTK, 0, 0, "Reading status of FLASH_SPI_READQ_REG fails");
+			return uiStatus;
 		}
 
 		iRetries--;
@@ -935,6 +944,7 @@ static INT flashWriteStatus(
 	//UINT uiReadBack = 0;
 	UINT value;
 	UINT uiErasePattern[4] = {0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF};
+	int bytes;
 
 //
 // need not write 0xFFFFFFFF because write requires an erase and erase will
@@ -967,10 +977,11 @@ static INT flashWriteStatus(
 			return STATUS_FAILURE;
 	  	}
 	  	//__udelay(1);
-	  	if(rdmalt(Adapter, FLASH_SPI_READQ_REG, &uiStatus, sizeof(uiStatus)) < 0)
-	  	{
-	  		BCM_DEBUG_PRINT(Adapter,DBG_TYPE_PRINTK, 0, 0,"Reading status of FLASH_SPI_READQ_REG fails");
-			return STATUS_FAILURE;
+		bytes = rdmalt(Adapter, FLASH_SPI_READQ_REG, &uiStatus, sizeof(uiStatus));
+		if (bytes < 0) {
+			uiStatus = bytes;
+			BCM_DEBUG_PRINT(Adapter, DBG_TYPE_PRINTK, 0, 0, "Reading status of FLASH_SPI_READQ_REG fails");
+			return uiStatus;
 		}
 	  	iRetries--;
 		//this will ensure that in there will be no changes in the current path.
@@ -1174,7 +1185,7 @@ static INT BeceemFlashBulkWrite(
 	if(NULL == pTempBuff)
 		goto BeceemFlashBulkWrite_EXIT;
 //
-// check if the data to be written is overlapped accross sectors
+// check if the data to be written is overlapped across sectors
 //
 	if(uiOffset+uiNumBytes < uiSectBoundary)
 	{
@@ -1390,7 +1401,7 @@ static INT BeceemFlashBulkWriteStatus(
 		goto BeceemFlashBulkWriteStatus_EXIT;
 
 //
-// check if the data to be written is overlapped accross sectors
+// check if the data to be written is overlapped across sectors
 //
 	if(uiOffset+uiNumBytes < uiSectBoundary)
 	{
@@ -1841,7 +1852,7 @@ static INT BeceemEEPROMWritePage( PMINI_ADAPTER Adapter, UINT uiData[], UINT uiO
 	 * What we are checking if the previous write has completed, and this
 	 * may take time. We should wait till the Empty bit is set. */
 	uiStatus = 0;
-	rdmalt( Adapter, EEPROM_SPI_Q_STATUS1_REG,&uiStatus, sizeof(uiStatus)) ;
+	rdmalt(Adapter, EEPROM_SPI_Q_STATUS1_REG, &uiStatus, sizeof(uiStatus));
 	while ( ( uiStatus & EEPROM_WRITE_QUEUE_EMPTY ) == 0 )
 	{
 		uiRetries--;
@@ -1855,7 +1866,7 @@ static INT BeceemEEPROMWritePage( PMINI_ADAPTER Adapter, UINT uiData[], UINT uiO
 					msleep(1);
 
 		uiStatus = 0;
-		rdmalt( Adapter, EEPROM_SPI_Q_STATUS1_REG,&uiStatus, sizeof(uiStatus)) ;
+		rdmalt(Adapter, EEPROM_SPI_Q_STATUS1_REG, &uiStatus, sizeof(uiStatus));
 		if(Adapter->device_removed == TRUE)
 		{
 			BCM_DEBUG_PRINT(Adapter,DBG_TYPE_PRINTK, 0, 0,"Modem got removed hence exiting from loop....");
@@ -2020,7 +2031,7 @@ INT BeceemEEPROMBulkWrite(
 //		uiNumBytes - Number of bytes to be read from the NVM.
 //
 // Returns:
-//		OSAL_STATUS_SUCCESS - if NVM read is successfull.
+//		OSAL_STATUS_SUCCESS - if NVM read is successful.
 //		<FAILURE>			- if failed.
 //-----------------------------------------------------------------------------
 
@@ -2083,7 +2094,7 @@ INT BeceemNVMRead(
 //		uiNumBytes - Number of bytes to be written..
 //
 // Returns:
-//		OSAL_STATUS_SUCCESS - if NVM write is successfull.
+//		OSAL_STATUS_SUCCESS - if NVM write is successful.
 //		<FAILURE>			- if failed.
 //-----------------------------------------------------------------------------
 
@@ -2218,7 +2229,7 @@ INT BeceemNVMWrite(
 //          uiSectorSize - sector size
 //
 // Returns:
-//		OSAL_STATUS_SUCCESS - if NVM write is successfull.
+//		OSAL_STATUS_SUCCESS - if NVM write is successful.
 //		<FAILURE>			- if failed.
 //-----------------------------------------------------------------------------
 
@@ -2430,7 +2441,7 @@ INT BcmInitNVM(PMINI_ADAPTER ps_adapter)
 *Input Parameter:
 *		Adapter data structure
 *Return Value :
-*		0. means sucess;
+*		0. means success;
 */
 /***************************************************************************/
 
@@ -2500,7 +2511,7 @@ static ULONG BcmReadFlashRDID(PMINI_ADAPTER Adapter)
 // Read SPI READQ REG. The output will be WWXXYYZZ.
 // The ID is 3Bytes long and is WWXXYY. ZZ needs to be Ignored.
 //
-	rdmalt(Adapter, FLASH_SPI_READQ_REG,(PUINT)&ulRDID, sizeof(ulRDID));
+	rdmalt(Adapter, FLASH_SPI_READQ_REG, (PUINT)&ulRDID, sizeof(ulRDID));
 
 	return (ulRDID >>8);
 
@@ -2998,7 +3009,7 @@ INT BcmGetSectionValStartOffset(PMINI_ADAPTER Adapter, FLASH2X_SECTION_VAL eFlas
 	/*
 	*	Considering all the section for which end offset can be calculated or directly given
 	*	in CS Structure. if matching case does not exist, return STATUS_FAILURE indicating section
-	*	endoffset can't be calculated or given in CS Stucture.
+	*	endoffset can't be calculated or given in CS Structure.
 	*/
 
 	INT SectStartOffset = 0 ;
@@ -3173,7 +3184,7 @@ INT BcmGetSectionValEndOffset(PMINI_ADAPTER Adapter, FLASH2X_SECTION_VAL eFlash2
 *	@uiNumBytes : Number of Bytes for Read
 *
 *	Return value:-
-*		return true on sucess and STATUS_FAILURE on fail.
+*		return true on success and STATUS_FAILURE on fail.
 */
 
 INT BcmFlash2xBulkRead(
@@ -3241,7 +3252,7 @@ INT BcmFlash2xBulkRead(
 *	@uiNumBytes : Number of Bytes for Write
 *
 *	Return value:-
-*		return true on sucess and STATUS_FAILURE on fail.
+*		return true on success and STATUS_FAILURE on fail.
 *
 */
 
@@ -3308,7 +3319,7 @@ INT BcmFlash2xBulkWrite(
 *	@Adapter :-Drivers private Data Structure
 *
 *	Return Value:-
-*		Return STATUS_SUCESS if get sucess in setting the right DSD else negaive error code
+*		Return STATUS_SUCESS if get success in setting the right DSD else negaive error code
 *
 **/
 static INT BcmGetActiveDSD(PMINI_ADAPTER Adapter)
@@ -3384,7 +3395,7 @@ static INT BcmGetActiveISO(PMINI_ADAPTER Adapter)
 *	@uiOffset : Offset provided in the Flash
 *
 *	Return Value:-
-*	Sucess:-TRUE ,  offset is writable
+*	Success:-TRUE ,  offset is writable
 *	Failure:-FALSE, offset is RO
 *
 **/
@@ -3441,7 +3452,7 @@ static INT BcmDumpFlash2xSectionBitMap(PFLASH2X_BITMAP psFlash2xBitMap)
 	@Adapter:-Driver private Data Structure
 *
 *	Return value:-
-*	Sucess:- STATUS_SUCESS
+*	Success:- STATUS_SUCESS
 *	Failure:- negative error code
 **/
 
@@ -3783,7 +3794,7 @@ INT BcmSetActiveSection(PMINI_ADAPTER Adapter, FLASH2X_SECTION_VAL eFlash2xSectV
 					// This is a SPECIAL Case which will only happen if the current highest priority ISO has priority value = 0x7FFFFFFF.
 					// We will write 1 to the current Highest priority ISO And then shall increase the priority of the requested ISO
 					// by user
-					BCM_DEBUG_PRINT(Adapter,DBG_TYPE_OTHERS, NVM_RW, DBG_LVL_ALL, "SectImagePriority wraparound happend, eFlash2xSectVal: 0x%x\n",eFlash2xSectVal);
+					BCM_DEBUG_PRINT(Adapter,DBG_TYPE_OTHERS, NVM_RW, DBG_LVL_ALL, "SectImagePriority wraparound happened, eFlash2xSectVal: 0x%x\n",eFlash2xSectVal);
 					SectImagePriority = htonl(0x1);
 					Status = BcmFlash2xBulkWrite(Adapter,
 								&SectImagePriority,
@@ -3853,7 +3864,7 @@ INT BcmSetActiveSection(PMINI_ADAPTER Adapter, FLASH2X_SECTION_VAL eFlash2xSectV
 					// This is a SPECIAL Case which will only happen if the current highest priority DSD has priority value = 0x7FFFFFFF.
 					// We will write 1 to the current Highest priority DSD And then shall increase the priority of the requested DSD
 					// by user
-					BCM_DEBUG_PRINT(Adapter,DBG_TYPE_PRINTK, NVM_RW, DBG_LVL_ALL, "SectImagePriority wraparound happend, eFlash2xSectVal: 0x%x\n",eFlash2xSectVal);
+					BCM_DEBUG_PRINT(Adapter,DBG_TYPE_PRINTK, NVM_RW, DBG_LVL_ALL, "SectImagePriority wraparound happened, eFlash2xSectVal: 0x%x\n",eFlash2xSectVal);
 					SectImagePriority = htonl(0x1);
 
 					Status = BcmFlash2xBulkWrite(Adapter,
@@ -4013,7 +4024,8 @@ INT BcmCopyISO(PMINI_ADAPTER Adapter, FLASH2X_COPY_SECTION sCopySectStrut)
 		if(uiTotalDataToCopy < ISOLength)
 		{
 			BCM_DEBUG_PRINT(Adapter,DBG_TYPE_PRINTK, 0, 0,"error as Source ISO Section does not have valid signature");
-			return STATUS_FAILURE;
+			Status = STATUS_FAILURE;
+			goto out;
 		}
 
 		uiTotalDataToCopy =(Adapter->psFlash2xCSInfo->OffsetISOImage2Part1End) -
@@ -4026,7 +4038,8 @@ INT BcmCopyISO(PMINI_ADAPTER Adapter, FLASH2X_COPY_SECTION sCopySectStrut)
 		if(uiTotalDataToCopy < ISOLength)
 		{
 			BCM_DEBUG_PRINT(Adapter,DBG_TYPE_PRINTK, 0, 0,"error as Dest ISO Section does not have enough section size");
-			return STATUS_FAILURE;
+			Status = STATUS_FAILURE;
+			goto out;
 		}
 
 		uiTotalDataToCopy = ISOLength;
@@ -4119,7 +4132,7 @@ INT BcmCopyISO(PMINI_ADAPTER Adapter, FLASH2X_COPY_SECTION sCopySectStrut)
 												MAX_RW_SIZE);
 				IsThisHeaderSector = FALSE ;
 			}
-			//substracting the written Data
+			//subtracting the written Data
 			uiTotalDataToCopy = uiTotalDataToCopy - Adapter->uiSectorSize ;
 		}
 
@@ -4143,7 +4156,8 @@ INT BcmCopyISO(PMINI_ADAPTER Adapter, FLASH2X_COPY_SECTION sCopySectStrut)
 		if(uiTotalDataToCopy < ISOLength)
 		{
 			BCM_DEBUG_PRINT(Adapter,DBG_TYPE_PRINTK, 0, 0,"error as Source ISO Section does not have valid signature");
-			return STATUS_FAILURE;
+			Status = STATUS_FAILURE;
+			goto out;
 		}
 
 		uiTotalDataToCopy =(Adapter->psFlash2xCSInfo->OffsetISOImage1Part1End) -
@@ -4156,7 +4170,8 @@ INT BcmCopyISO(PMINI_ADAPTER Adapter, FLASH2X_COPY_SECTION sCopySectStrut)
 		if(uiTotalDataToCopy < ISOLength)
 		{
 			BCM_DEBUG_PRINT(Adapter,DBG_TYPE_PRINTK, 0, 0,"error as Dest ISO Section does not have enough section size");
-			return STATUS_FAILURE;
+			Status = STATUS_FAILURE;
+			goto out;
 		}
 
 		uiTotalDataToCopy = ISOLength;
@@ -4250,13 +4265,14 @@ INT BcmCopyISO(PMINI_ADAPTER Adapter, FLASH2X_COPY_SECTION sCopySectStrut)
 				IsThisHeaderSector = FALSE ;
 			}
 
-			//substracting the written Data
+			//subtracting the written Data
 			uiTotalDataToCopy = uiTotalDataToCopy - Adapter->uiSectorSize ;
 		}
 
 
 	}
 
+out:
 	kfree(Buff);
 
 	return Status;
@@ -4268,7 +4284,7 @@ BcmFlash2xCorruptSig : this API is used to corrupt the written sig in Bcm Header
 @eFlash2xSectionVal :- Flash section val which has header
 
 Return Value :-
-	Sucess :- If Section is present and writable, corrupt the sig and return STATUS_SUCCESS
+	Success :- If Section is present and writable, corrupt the sig and return STATUS_SUCCESS
 	Failure :-Return negative error code
 
 
@@ -4301,7 +4317,7 @@ BcmFlash2xWriteSig :-this API is used to Write the sig if requested Section has
 @eFlashSectionVal :- Flash section val which has header
 
 Return Value :-
-	Sucess :- If Section is present and writable write the sig and return STATUS_SUCCESS
+	Success :- If Section is present and writable write the sig and return STATUS_SUCCESS
 	Failure :-Return negative error code
 
 **/
@@ -4504,7 +4520,7 @@ BcmCopySection :- This API is used to copy the One section in another. Both sect
 			     in case of numofBytes  equal zero complete section will be copied.
 
 Return Values-
-	Sucess : Return STATUS_SUCCESS
+	Success : Return STATUS_SUCCESS
 	Faillure :- return negative error code
 
 **/
@@ -4621,7 +4637,7 @@ SaveHeaderIfPresent :- This API is use to Protect the Header in case of Header S
 @uiOffset :- Flash offset that has to be written.
 
 Return value :-
-	Sucess :- On sucess return STATUS_SUCCESS
+	Success :- On success return STATUS_SUCCESS
 	Faillure :- Return negative error code
 
 **/
@@ -4634,7 +4650,7 @@ INT SaveHeaderIfPresent(PMINI_ADAPTER Adapter, PUCHAR pBuff, UINT uiOffset)
 	UINT uiSectAlignAddr = 0;
 	UINT sig = 0;
 
-	//making the offset sector alligned
+	//making the offset sector aligned
 	uiSectAlignAddr = uiOffset & ~(Adapter->uiSectorSize - 1);
 
 
@@ -4643,7 +4659,7 @@ INT SaveHeaderIfPresent(PMINI_ADAPTER Adapter, PUCHAR pBuff, UINT uiOffset)
 	(uiSectAlignAddr == BcmGetSectionValEndOffset(Adapter,DSD0)- Adapter->uiSectorSize))
 	{
 
-		//offset from the sector boundry having the header map
+		//offset from the sector boundary having the header map
 		offsetToProtect = Adapter->psFlash2xCSInfo->OffsetFromDSDStartForDSDHeader % Adapter->uiSectorSize;
 		HeaderSizeToProtect = sizeof(DSD_HEADER);
 		bHasHeader = TRUE ;
@@ -4697,7 +4713,7 @@ BcmDoChipSelect : This will selcet the appropriate chip for writing.
 @Adapater :- Bcm Driver Private Data Structure
 
 OutPut:-
-	Select the Appropriate chip and retrn status Sucess
+	Select the Appropriate chip and retrn status Success
 **/
 static INT BcmDoChipSelect(PMINI_ADAPTER Adapter, UINT offset)
 {
@@ -4730,8 +4746,8 @@ static INT BcmDoChipSelect(PMINI_ADAPTER Adapter, UINT offset)
 	Adapter->SelectedChip = ChipNum ;
 
 	//bit[13..12]  will select the appropriate chip
-	rdmalt(Adapter,FLASH_CONFIG_REG, &FlashConfig, 4);
-	rdmalt(Adapter,FLASH_GPIO_CONFIG_REG, &GPIOConfig, 4);
+	rdmalt(Adapter, FLASH_CONFIG_REG, &FlashConfig, 4);
+	rdmalt(Adapter, FLASH_GPIO_CONFIG_REG, &GPIOConfig, 4);
 
 	{
 		switch(ChipNum)
@@ -5086,7 +5102,7 @@ static INT CorruptDSDSig(PMINI_ADAPTER Adapter, FLASH2X_SECTION_VAL eFlash2xSect
 	{
 		if(IsSectionWritable(Adapter,eFlash2xSectionVal) != TRUE)
 		{
-			BCM_DEBUG_PRINT(Adapter,DBG_TYPE_PRINTK, 0, 0,"Section is not Writable...Hence cant Corrupt signature");
+			BCM_DEBUG_PRINT(Adapter,DBG_TYPE_PRINTK, 0, 0,"Section is not Writable...Hence can't Corrupt signature");
 			return SECTOR_IS_NOT_WRITABLE;
 		}
 	}
@@ -5155,7 +5171,7 @@ static INT CorruptISOSig(PMINI_ADAPTER Adapter, FLASH2X_SECTION_VAL eFlash2xSect
 
 	if(IsSectionWritable(Adapter,eFlash2xSectionVal) != TRUE)
 	{
-		BCM_DEBUG_PRINT(Adapter,DBG_TYPE_PRINTK, 0, 0,"Section is not Writable...Hence cant Corrupt signature");
+		BCM_DEBUG_PRINT(Adapter,DBG_TYPE_PRINTK, 0, 0,"Section is not Writable...Hence can't Corrupt signature");
 		return SECTOR_IS_NOT_WRITABLE;
 	}
 

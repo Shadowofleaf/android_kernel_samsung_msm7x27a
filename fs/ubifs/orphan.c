@@ -130,13 +130,14 @@ void ubifs_delete_orphan(struct ubifs_info *c, ino_t inum)
 		else if (inum > o->inum)
 			p = p->rb_right;
 		else {
-			if (o->dnext) {
+			if (o->del) {
 				spin_unlock(&c->orphan_lock);
 				dbg_gen("deleted twice ino %lu",
 					(unsigned long)inum);
 				return;
 			}
 			if (o->cnext) {
+				o->del = 1;
 				o->dnext = c->orph_dnext;
 				c->orph_dnext = o;
 				spin_unlock(&c->orphan_lock);
@@ -447,6 +448,7 @@ static void erase_deleted(struct ubifs_info *c)
 		orphan = dnext;
 		dnext = orphan->dnext;
 		ubifs_assert(!orphan->new);
+		ubifs_assert(orphan->del);
 		rb_erase(&orphan->rb, &c->orph_tree);
 		list_del(&orphan->list);
 		c->tot_orphans -= 1;
@@ -536,6 +538,7 @@ static int insert_dead_orphan(struct ubifs_info *c, ino_t inum)
 	rb_link_node(&orphan->rb, parent, p);
 	rb_insert_color(&orphan->rb, &c->orph_tree);
 	list_add_tail(&orphan->list, &c->orph_list);
+	orphan->del = 1;
 	orphan->dnext = c->orph_dnext;
 	c->orph_dnext = orphan;
 	dbg_mnt("ino %lu, new %d, tot %d", (unsigned long)inum,
@@ -673,7 +676,8 @@ static int kill_orphans(struct ubifs_info *c)
 		sleb = ubifs_scan(c, lnum, 0, c->sbuf, 1);
 		if (IS_ERR(sleb)) {
 			if (PTR_ERR(sleb) == -EUCLEAN)
-				sleb = ubifs_recover_leb(c, lnum, 0, c->sbuf, 0);
+				sleb = ubifs_recover_leb(c, lnum, 0,
+							 c->sbuf, -1);
 			if (IS_ERR(sleb)) {
 				err = PTR_ERR(sleb);
 				break;
@@ -892,15 +896,22 @@ static int dbg_read_orphans(struct check_info *ci, struct ubifs_scan_leb *sleb)
 static int dbg_scan_orphans(struct ubifs_info *c, struct check_info *ci)
 {
 	int lnum, err = 0;
+	void *buf;
 
 	/* Check no-orphans flag and skip this if no orphans */
 	if (c->no_orphs)
 		return 0;
 
+	buf = __vmalloc(c->leb_size, GFP_NOFS, PAGE_KERNEL);
+	if (!buf) {
+		ubifs_err("cannot allocate memory to check orphans");
+		return 0;
+	}
+
 	for (lnum = c->orph_first; lnum <= c->orph_last; lnum++) {
 		struct ubifs_scan_leb *sleb;
 
-		sleb = ubifs_scan(c, lnum, 0, c->dbg->buf, 0);
+		sleb = ubifs_scan(c, lnum, 0, buf, 0);
 		if (IS_ERR(sleb)) {
 			err = PTR_ERR(sleb);
 			break;
@@ -912,6 +923,7 @@ static int dbg_scan_orphans(struct ubifs_info *c, struct check_info *ci)
 			break;
 	}
 
+	vfree(buf);
 	return err;
 }
 
@@ -920,7 +932,7 @@ static int dbg_check_orphans(struct ubifs_info *c)
 	struct check_info ci;
 	int err;
 
-	if (!(ubifs_chk_flags & UBIFS_CHK_ORPH))
+	if (!dbg_is_chk_orph(c))
 		return 0;
 
 	ci.last_ino = 0;

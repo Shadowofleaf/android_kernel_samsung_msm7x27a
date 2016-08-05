@@ -344,7 +344,7 @@ static irqreturn_t bpci_interrupt(int irq, void *dev_id)
  *                              PCI_ACCESS_WRITE and PCI_ACCESS_READ.
  *
  *               bus          - pointer to the bus number of the device to
- *                              be targetted for the configuration cycle.
+ *                              be targeted for the configuration cycle.
  *                              The only element of the pci_bus structure
  *                              used is bus->number. This argument determines
  *                              if the configuration access will be Type 0 or
@@ -354,7 +354,7 @@ static irqreturn_t bpci_interrupt(int irq, void *dev_id)
  *
  *               devfn        - this is an 8-bit field. The lower three bits
  *                              specify the function number of the device to
- *                              be targetted for the configuration cycle, with
+ *                              be targeted for the configuration cycle, with
  *                              all three-bit combinations being legal. The
  *                              upper five bits specify the device number,
  *                              with legal values being 10 to 31.
@@ -405,7 +405,7 @@ int msp_pcibios_config_access(unsigned char access_type,
 	if (pciirqflag == 0) {
 		ret = request_irq(MSP_INT_PCI,/* Hardcoded internal MSP7120 wiring */
 				bpci_interrupt,
-				IRQF_SHARED | IRQF_DISABLED,
+				IRQF_SHARED,
 				"PMC MSP PCI Host",
 				preg);
 		if (ret != 0)

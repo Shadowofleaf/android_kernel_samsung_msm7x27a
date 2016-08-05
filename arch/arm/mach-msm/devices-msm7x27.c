@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2008 Google, Inc.
- * Copyright (c) 2008-2011, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2008-2012, The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -15,9 +15,10 @@
 
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
-#include <linux/msm_kgsl.h>
+#include <mach/kgsl.h>
 #include <linux/regulator/machine.h>
 #include <linux/dma-mapping.h>
+#include <linux/init.h>
 #include <asm/clkdev.h>
 #include <mach/irqs.h>
 #include <mach/msm_iomap.h>
@@ -25,16 +26,17 @@
 #include <mach/board.h>
 
 #include "devices.h"
-#include "gpio_hw.h"
 #include "footswitch.h"
+#include "acpuclock.h"
 
 #include <asm/mach/flash.h>
 
 #include <asm/mach/mmc.h>
 #include <mach/msm_hsusb.h>
 #include <mach/usbdiag.h>
-#include <mach/usb_gadget_fserial.h>
 #include <mach/rpc_hsusb.h>
+#include "irq.h"
+#include "pm.h"
 
 static struct resource resources_uart1[] = {
 	{
@@ -43,8 +45,8 @@ static struct resource resources_uart1[] = {
 		.flags	= IORESOURCE_IRQ,
 	},
 	{
-		.start	= MSM_UART1_PHYS,
-		.end	= MSM_UART1_PHYS + MSM_UART1_SIZE - 1,
+		.start	= MSM7XXX_UART1_PHYS,
+		.end	= MSM7XXX_UART1_PHYS + MSM7XXX_UART1_SIZE - 1,
 		.flags	= IORESOURCE_MEM,
 	},
 };
@@ -56,8 +58,8 @@ static struct resource resources_uart2[] = {
 		.flags	= IORESOURCE_IRQ,
 	},
 	{
-		.start	= MSM_UART2_PHYS,
-		.end	= MSM_UART2_PHYS + MSM_UART2_SIZE - 1,
+		.start	= MSM7XXX_UART2_PHYS,
+		.end	= MSM7XXX_UART2_PHYS + MSM7XXX_UART2_SIZE - 1,
 		.flags	= IORESOURCE_MEM,
 	},
 };
@@ -74,6 +76,21 @@ struct platform_device msm_device_uart2 = {
 	.id	= 1,
 	.num_resources	= ARRAY_SIZE(resources_uart2),
 	.resource	= resources_uart2,
+};
+
+static struct resource resources_adsp[] = {
+	{
+		.start  = INT_ADSP_A9_A11,
+		.end    = INT_ADSP_A9_A11,
+		.flags  = IORESOURCE_IRQ,
+	},
+};
+
+struct platform_device msm_adsp_device = {
+	.name           = "msm_adsp",
+	.id             = -1,
+	.num_resources  = ARRAY_SIZE(resources_adsp),
+	.resource       = resources_adsp,
 };
 
 #define MSM_UART1DM_PHYS      0xA0200000
@@ -299,35 +316,6 @@ int msm_add_host(unsigned int host, struct msm_usb_host_platform_data *plat)
 	return platform_device_register(pdev);
 }
 
-#ifdef CONFIG_USB_ANDROID_DIAG
-struct usb_diag_platform_data usb_diag_pdata = {
-	.ch_name = DIAG_LEGACY,
-	.update_pid_and_serial_num = usb_diag_update_pid_and_serial_num,
-};
-
-struct platform_device usb_diag_device = {
-	.name	= "usb_diag",
-	.id	= -1,
-	.dev	= {
-		.platform_data = &usb_diag_pdata,
-	},
-};
-#endif
-
-#ifdef CONFIG_USB_F_SERIAL
-static struct usb_gadget_fserial_platform_data fserial_pdata = {
-	.no_ports	= 2,
-};
-
-struct platform_device usb_gadget_fserial_device = {
-	.name	= "usb_fserial",
-	.id	= -1,
-	.dev	= {
-		.platform_data = &fserial_pdata,
-	},
-};
-#endif
-
 struct platform_device asoc_msm_pcm = {
 	.name   = "msm-dsp-audio",
 	.id     = 0,
@@ -402,12 +390,21 @@ struct platform_device msm_device_smd = {
 	.id	= -1,
 };
 
-struct resource msm_dmov_resource[] = {
+static struct resource msm_dmov_resource[] = {
 	{
 		.start = INT_ADM_AARM,
-		.end = (resource_size_t)MSM_DMOV_BASE,
 		.flags = IORESOURCE_IRQ,
 	},
+	{
+		.start = 0xA9700000,
+		.end = 0xA9700000 + SZ_4K - 1,
+		.flags = IORESOURCE_MEM,
+	},
+};
+
+static struct msm_dmov_pdata msm_dmov_pdata = {
+	.sd = 3,
+	.sd_size = 0x400,
 };
 
 struct platform_device msm_device_dmov = {
@@ -415,6 +412,34 @@ struct platform_device msm_device_dmov = {
 	.id	= -1,
 	.resource = msm_dmov_resource,
 	.num_resources = ARRAY_SIZE(msm_dmov_resource),
+	.dev = {
+		.platform_data = &msm_dmov_pdata,
+	},
+};
+
+static struct msm_pm_irq_calls msm7x27_pm_irq_calls = {
+	.irq_pending = msm_irq_pending,
+	.idle_sleep_allowed = msm_irq_idle_sleep_allowed,
+	.enter_sleep1 = msm_irq_enter_sleep1,
+	.enter_sleep2 = msm_irq_enter_sleep2,
+	.exit_sleep1 = msm_irq_exit_sleep1,
+	.exit_sleep2 = msm_irq_exit_sleep2,
+	.exit_sleep3 = msm_irq_exit_sleep3,
+};
+
+void __init msm_pm_register_irqs(void)
+{
+	msm_pm_set_irq_extns(&msm7x27_pm_irq_calls);
+}
+
+static struct acpuclk_pdata msm7x27_acpuclk_pdata = {
+	.max_speed_delta_khz = 400000,
+};
+
+struct platform_device msm7x27_device_acpuclk = {
+	.name		= "acpuclk-7627",
+	.id		= -1,
+	.dev.platform_data = &msm7x27_acpuclk_pdata,
 };
 
 #define MSM_SDC1_BASE         0xA0400000
@@ -423,23 +448,25 @@ struct platform_device msm_device_dmov = {
 #define MSM_SDC4_BASE         0xA0700000
 static struct resource resources_sdc1[] = {
 	{
+		.name	= "core_mem",
 		.start	= MSM_SDC1_BASE,
 		.end	= MSM_SDC1_BASE + SZ_4K - 1,
 		.flags	= IORESOURCE_MEM,
 	},
 	{
+		.name	= "core_irq",
 		.start	= INT_SDC1_0,
 		.end	= INT_SDC1_1,
 		.flags	= IORESOURCE_IRQ,
 	},
 	{
-		.name	= "sdcc_dma_chnl",
+		.name	= "dma_chnl",
 		.start	= DMOV_SDC1_CHAN,
 		.end	= DMOV_SDC1_CHAN,
 		.flags	= IORESOURCE_DMA,
 	},
 	{
-		.name	= "sdcc_dma_crci",
+		.name	= "dma_crci",
 		.start	= DMOV_SDC1_CRCI,
 		.end	= DMOV_SDC1_CRCI,
 		.flags	= IORESOURCE_DMA,
@@ -448,23 +475,25 @@ static struct resource resources_sdc1[] = {
 
 static struct resource resources_sdc2[] = {
 	{
+		.name	= "core_mem",
 		.start	= MSM_SDC2_BASE,
 		.end	= MSM_SDC2_BASE + SZ_4K - 1,
 		.flags	= IORESOURCE_MEM,
 	},
 	{
+		.name   = "core_irq",
 		.start	= INT_SDC2_0,
 		.end	= INT_SDC2_1,
 		.flags	= IORESOURCE_IRQ,
 	},
 	{
-		.name	= "sdcc_dma_chnl",
+		.name	= "dma_chnl",
 		.start	= DMOV_SDC2_CHAN,
 		.end	= DMOV_SDC2_CHAN,
 		.flags	= IORESOURCE_DMA,
 	},
 	{
-		.name	= "sdcc_dma_crci",
+		.name	= "dma_crci",
 		.start	= DMOV_SDC2_CRCI,
 		.end	= DMOV_SDC2_CRCI,
 		.flags	= IORESOURCE_DMA,
@@ -473,23 +502,25 @@ static struct resource resources_sdc2[] = {
 
 static struct resource resources_sdc3[] = {
 	{
+		.name	= "core_mem",
 		.start	= MSM_SDC3_BASE,
 		.end	= MSM_SDC3_BASE + SZ_4K - 1,
 		.flags	= IORESOURCE_MEM,
 	},
 	{
+		.name   = "core_irq",
 		.start	= INT_SDC3_0,
 		.end	= INT_SDC3_1,
 		.flags	= IORESOURCE_IRQ,
 	},
 	{
-		.name	= "sdcc_dma_chnl",
+		.name	= "dma_chnl",
 		.start	= DMOV_SDC3_CHAN,
 		.end	= DMOV_SDC3_CHAN,
 		.flags	= IORESOURCE_DMA,
 	},
 	{
-		.name	= "sdcc_dma_crci",
+		.name	= "dma_crci",
 		.start	= DMOV_SDC3_CRCI,
 		.end	= DMOV_SDC3_CRCI,
 		.flags	= IORESOURCE_DMA,
@@ -498,23 +529,25 @@ static struct resource resources_sdc3[] = {
 
 static struct resource resources_sdc4[] = {
 	{
+		.name	= "core_mem",
 		.start	= MSM_SDC4_BASE,
 		.end	= MSM_SDC4_BASE + SZ_4K - 1,
 		.flags	= IORESOURCE_MEM,
 	},
 	{
+		.name   = "core_irq",
 		.start	= INT_SDC4_0,
 		.end	= INT_SDC4_1,
 		.flags	= IORESOURCE_IRQ,
 	},
 	{
-		.name	= "sdcc_dma_chnl",
+		.name	= "dma_chnl",
 		.start	= DMOV_SDC4_CHAN,
 		.end	= DMOV_SDC4_CHAN,
 		.flags	= IORESOURCE_DMA,
 	},
 	{
-		.name	= "sdcc_dma_crci",
+		.name	= "dma_crci",
 		.start	= DMOV_SDC4_CRCI,
 		.end	= DMOV_SDC4_CRCI,
 		.flags	= IORESOURCE_DMA,
@@ -825,32 +858,23 @@ static struct resource kgsl_3d0_resources[] = {
 };
 
 static struct kgsl_device_platform_data kgsl_3d0_pdata = {
-	.pwr_data = {
-		/* bus_freq has been set to 160000 for power savings.
-		 * OEMs may modify the value at their discretion for performance
-		 * The appropriate maximum replacement for 160000 is:
-		 * msm7x2x_clock_data.max_axi_khz
-		 */
-		.pwrlevel = {
-			{
-				.gpu_freq = 0,
-				.bus_freq = 160000000,
-			},
-		},
-		.init_level = 0,
-		.num_levels = 1,
-		.set_grp_async = NULL,
-		.idle_timeout = HZ/5,
-	},
-	.clk = {
-		.name = {
-			.clk = "grp_clk",
-			.pclk = "grp_pclk",
+	/* bus_freq has been set to 160000 for power savings.
+	* OEMs may modify the value at their discretion for performance
+	* The appropriate maximum replacement for 160000 is:
+	* msm7x2x_clock_data.max_axi_khz
+	*/
+	.pwrlevel = {
+		{
+			.gpu_freq = 0,
+			.bus_freq = 160000000,
 		},
 	},
-	.imem_clk_name = {
-		.clk = "imem_clk",
-	},
+	.init_level = 0,
+	.num_levels = 1,
+	.set_grp_async = NULL,
+	.idle_timeout = HZ,
+	.strtstp_sleepwake = true,
+	.clk_map = KGSL_CLK_CORE | KGSL_CLK_IFACE | KGSL_CLK_MEM,
 };
 
 struct platform_device msm_kgsl_3d0 = {
@@ -864,6 +888,32 @@ struct platform_device msm_kgsl_3d0 = {
 };
 
 struct platform_device *msm_footswitch_devices[] = {
-	FS_PCOM(FS_GFX3D,  "fs_gfx3d"),
+	FS_PCOM(FS_GFX3D,  "vdd", "kgsl-3d0.0"),
 };
 unsigned msm_num_footswitch_devices = ARRAY_SIZE(msm_footswitch_devices);
+
+static struct resource gpio_resources[] = {
+	{
+		.start  = INT_GPIO_GROUP1,
+		.flags  = IORESOURCE_IRQ,
+	},
+	{
+		.start  = INT_GPIO_GROUP2,
+		.flags  = IORESOURCE_IRQ,
+	},
+};
+
+static struct platform_device msm_device_gpio = {
+	.name	   = "msmgpio",
+	.id	     = -1,
+	.resource       = gpio_resources,
+	.num_resources  = ARRAY_SIZE(gpio_resources),
+};
+
+static int __init msm7627_init_gpio(void)
+{
+	platform_device_register(&msm_device_gpio);
+	return 0;
+}
+
+postcore_initcall(msm7627_init_gpio);

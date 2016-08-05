@@ -1,7 +1,7 @@
 /*
  * OMAP2/3 Power/Reset Management (PRM) register definitions
  *
- * Copyright (C) 2007-2009 Texas Instruments, Inc.
+ * Copyright (C) 2007-2009, 2011 Texas Instruments, Inc.
  * Copyright (C) 2008-2010 Nokia Corporation
  * Paul Walmsley
  *
@@ -282,7 +282,8 @@ static inline int omap2_prm_assert_hardreset(s16 prm_mod, u8 shift)
 		"not suppose to be used on omap4\n");
 	return 0;
 }
-static inline int omap2_prm_deassert_hardreset(s16 prm_mod, u8 shift)
+static inline int omap2_prm_deassert_hardreset(s16 prm_mod, u8 rst_shift,
+						u8 st_shift)
 {
 	WARN(1, "prm: omap2xxx/omap3xxx specific function and "
 		"not suppose to be used on omap4\n");
@@ -300,9 +301,28 @@ extern u32 omap2_prm_read_mod_bits_shift(s16 domain, s16 idx, u32 mask);
 /* These omap2_ PRM functions apply to both OMAP2 and 3 */
 extern int omap2_prm_is_hardreset_asserted(s16 prm_mod, u8 shift);
 extern int omap2_prm_assert_hardreset(s16 prm_mod, u8 shift);
-extern int omap2_prm_deassert_hardreset(s16 prm_mod, u8 shift);
+extern int omap2_prm_deassert_hardreset(s16 prm_mod, u8 rst_shift, u8 st_shift);
+
+/* OMAP3-specific VP functions */
+u32 omap3_prm_vp_check_txdone(u8 vp_id);
+void omap3_prm_vp_clear_txdone(u8 vp_id);
+
+/*
+ * OMAP3 access functions for voltage controller (VC) and
+ * voltage proccessor (VP) in the PRM.
+ */
+extern u32 omap3_prm_vcvp_read(u8 offset);
+extern void omap3_prm_vcvp_write(u32 val, u8 offset);
+extern u32 omap3_prm_vcvp_rmw(u32 mask, u32 bits, u8 offset);
+
+/* PRM interrupt-related functions */
+extern void omap3xxx_prm_read_pending_irqs(unsigned long *events);
+extern void omap3xxx_prm_ocp_barrier(void);
+extern void omap3xxx_prm_save_and_clear_irqen(u32 *saved_mask);
+extern void omap3xxx_prm_restore_irqen(u32 *saved_mask);
 
 #endif	/* CONFIG_ARCH_OMAP4 */
+
 #endif
 
 /*

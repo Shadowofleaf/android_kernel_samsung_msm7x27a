@@ -129,7 +129,6 @@ typedef s390_fp_regs compat_elf_fpregset_t;
 typedef s390_compat_regs compat_elf_gregset_t;
 
 #include <linux/sched.h>	/* for task_struct */
-#include <asm/system.h>		/* for save_access_regs */
 #include <asm/mmu_context.h>
 
 #include <asm/vdso.h>
@@ -188,25 +187,14 @@ extern char elf_platform[];
 #define SET_PERSONALITY(ex)					\
 do {								\
 	if (personality(current->personality) != PER_LINUX32)	\
-		set_personality(PER_LINUX);			\
+		set_personality(PER_LINUX |			\
+			(current->personality & ~PER_MASK));	\
 	if ((ex).e_ident[EI_CLASS] == ELFCLASS32)		\
 		set_thread_flag(TIF_31BIT);			\
 	else							\
 		clear_thread_flag(TIF_31BIT);			\
 } while (0)
 #endif /* __s390x__ */
-
-/*
- * An executable for which elf_read_implies_exec() returns TRUE will
- * have the READ_IMPLIES_EXEC personality flag set automatically.
- */
-#define elf_read_implies_exec(ex, executable_stack)	\
-({							\
-	if (current->mm->context.noexec &&		\
-	    executable_stack != EXSTACK_DISABLE_X)	\
-		disable_noexec(current->mm, current);	\
-	current->mm->context.noexec == 0;		\
-})
 
 #define STACK_RND_MASK	0x7ffUL
 

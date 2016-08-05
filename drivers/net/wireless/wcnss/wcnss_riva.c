@@ -1,4 +1,4 @@
-/* Copyright (c) 2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -18,14 +18,21 @@
 #include <linux/regulator/consumer.h>
 #include <linux/mfd/pm8xxx/pm8921.h>
 #include <linux/mfd/pm8xxx/gpio.h>
+#include <linux/wcnss_wlan.h>
+#include <linux/semaphore.h>
+#include <linux/list.h>
+#include <linux/slab.h>
+#include <linux/clk.h>
 #include <mach/msm_xo.h>
 #include <mach/msm_iomap.h>
 
-#include "wcnss_riva.h"
 
 static void __iomem *msm_riva_base;
 static struct msm_xo_voter *wlan_clock;
 static const char *id = "WLAN";
+static LIST_HEAD(power_on_lock_list);
+static DEFINE_MUTEX(list_lock);
+static DEFINE_SEMAPHORE(riva_power_on_lock);
 
 #define MSM_RIVA_PHYS                     0x03204000
 #define RIVA_PMU_CFG                      (msm_riva_base + 0x28)
@@ -36,6 +43,9 @@ static const char *id = "WLAN";
 
 #define RIVA_PMU_CFG_IRIS_XO_MODE         0x6
 #define RIVA_PMU_CFG_IRIS_XO_MODE_48      (3 << 1)
+
+#define RIVA_SPARE_OUT              (msm_riva_base + 0x0b4)
+#define NVBIN_DLND_BIT              BIT(25)
 
 #define VREG_NULL_CONFIG            0x0000
 #define VREG_GET_REGULATOR_MASK     0x0001
@@ -54,11 +64,10 @@ struct vregs_info {
 };
 
 static struct vregs_info iris_vregs[] = {
-	{"iris_vddio",  VREG_NULL_CONFIG, 0000000, 0, 0000000, 0,      NULL},
 	{"iris_vddxo",  VREG_NULL_CONFIG, 1800000, 0, 1800000, 10000,  NULL},
 	{"iris_vddrfa", VREG_NULL_CONFIG, 1300000, 0, 1300000, 100000, NULL},
-	{"iris_vddpa",  VREG_NULL_CONFIG, 2900000, 0, 2900000, 515000, NULL},
-	{"iris_vdddig", VREG_NULL_CONFIG, 0000000, 0, 0000000, 0,      NULL},
+	{"iris_vddpa",  VREG_NULL_CONFIG, 2900000, 0, 3000000, 515000, NULL},
+	{"iris_vdddig", VREG_NULL_CONFIG, 1200000, 0, 1225000, 10000,  NULL},
 };
 
 static struct vregs_info riva_vregs[] = {
@@ -67,10 +76,21 @@ static struct vregs_info riva_vregs[] = {
 	{"riva_vddpx",  VREG_NULL_CONFIG, 1800000, 0, 1800000, 0,      NULL},
 };
 
-static int configure_iris_xo(bool use_48mhz_xo, int on)
+struct host_driver {
+	char name[20];
+	struct list_head list;
+};
+
+
+static int configure_iris_xo(struct device *dev, bool use_48mhz_xo, int on)
 {
 	u32 reg = 0;
 	int rc = 0;
+	struct clk *cxo = clk_get(dev, "cxo");
+	if (IS_ERR(cxo)) {
+		pr_err("Couldn't get cxo clock\n");
+		return PTR_ERR(cxo);
+	}
 
 	if (on) {
 		msm_riva_base = ioremap(MSM_RIVA_PHYS, SZ_256);
@@ -80,6 +100,19 @@ static int configure_iris_xo(bool use_48mhz_xo, int on)
 		}
 
 		/* Enable IRIS XO */
+		rc = clk_prepare_enable(cxo);
+		if (rc) {
+			pr_err("cxo enable failed\n");
+			goto fail;
+		}
+		/* NV bit is set to indicate that platform driver is capable
+		 * of doing NV download.
+		 */
+		pr_debug("wcnss: Indicate NV bin download\n");
+		reg = readl_relaxed(RIVA_SPARE_OUT);
+		reg |= NVBIN_DLND_BIT;
+		writel_relaxed(reg, RIVA_SPARE_OUT);
+
 		writel_relaxed(0, RIVA_PMU_CFG);
 		reg = readl_relaxed(RIVA_PMU_CFG);
 		reg |= RIVA_PMU_CFG_GC_BUS_MUX_SEL_TOP |
@@ -107,20 +140,21 @@ static int configure_iris_xo(bool use_48mhz_xo, int on)
 		reg &= ~(RIVA_PMU_CFG_GC_BUS_MUX_SEL_TOP |
 				RIVA_PMU_CFG_IRIS_XO_CFG);
 		writel_relaxed(reg, RIVA_PMU_CFG);
+		clk_disable_unprepare(cxo);
 
 		if (!use_48mhz_xo) {
-			wlan_clock = msm_xo_get(MSM_XO_TCXO_A0, id);
+			wlan_clock = msm_xo_get(MSM_XO_TCXO_A2, id);
 			if (IS_ERR(wlan_clock)) {
 				rc = PTR_ERR(wlan_clock);
-				pr_err("Failed to get MSM_XO_TCXO_A0 voter"
-							" (%d)\n", rc);
+				pr_err("Failed to get MSM_XO_TCXO_A2 voter (%d)\n",
+					rc);
 				goto fail;
 			}
 
 			rc = msm_xo_mode_vote(wlan_clock, MSM_XO_MODE_ON);
 			if (rc < 0) {
-				pr_err("Configuring MSM_XO_MODE_ON failed"
-							" (%d)\n", rc);
+				pr_err("Configuring MSM_XO_MODE_ON failed (%d)\n",
+					rc);
 				goto msm_xo_vote_fail;
 			}
 		}
@@ -128,20 +162,22 @@ static int configure_iris_xo(bool use_48mhz_xo, int on)
 		if (wlan_clock != NULL && !use_48mhz_xo) {
 			rc = msm_xo_mode_vote(wlan_clock, MSM_XO_MODE_OFF);
 			if (rc < 0)
-				pr_err("Configuring MSM_XO_MODE_OFF failed"
-							" (%d)\n", rc);
+				pr_err("Configuring MSM_XO_MODE_OFF failed (%d)\n",
+					rc);
 		}
 	}
 
 	/* Add some delay for XO to settle */
 	msleep(20);
 
+	clk_put(cxo);
 	return rc;
 
 msm_xo_vote_fail:
 	msm_xo_put(wlan_clock);
 
 fail:
+	clk_put(cxo);
 	return rc;
 }
 
@@ -194,7 +230,7 @@ static void wcnss_vregs_off(struct vregs_info regulators[], uint size)
 static int wcnss_vregs_on(struct device *dev,
 		struct vregs_info regulators[], uint size)
 {
-	int i, rc = 0;
+	int i, rc = 0, reg_cnt;
 
 	for (i = 0; i < size; i++) {
 			/* Get regulator source */
@@ -207,9 +243,10 @@ static int wcnss_vregs_on(struct device *dev,
 				goto fail;
 		}
 		regulators[i].state |= VREG_GET_REGULATOR_MASK;
-
+		reg_cnt = regulator_count_voltages(regulators[i].regulator);
 		/* Set voltage to nominal. Exclude swtiches e.g. LVS */
-		if (regulators[i].nominal_min || regulators[i].max_voltage) {
+		if ((regulators[i].nominal_min || regulators[i].max_voltage)
+				&& (reg_cnt > 0)) {
 			rc = regulator_set_voltage(regulators[i].regulator,
 					regulators[i].nominal_min,
 					regulators[i].max_voltage);
@@ -222,7 +259,7 @@ static int wcnss_vregs_on(struct device *dev,
 		}
 
 		/* Vote for PWM/PFM mode if needed */
-		if (regulators[i].uA_load) {
+		if (regulators[i].uA_load && (reg_cnt > 0)) {
 			rc = regulator_set_optimum_mode(regulators[i].regulator,
 					regulators[i].uA_load);
 			if (rc < 0) {
@@ -278,6 +315,7 @@ int wcnss_wlan_power(struct device *dev,
 	int rc = 0;
 
 	if (on) {
+		down(&riva_power_on_lock);
 		/* RIVA regulator settings */
 		rc = wcnss_riva_vregs_on(dev);
 		if (rc)
@@ -289,12 +327,15 @@ int wcnss_wlan_power(struct device *dev,
 			goto fail_iris_on;
 
 		/* Configure IRIS XO */
-		rc = configure_iris_xo(cfg->use_48mhz_xo, WCNSS_WLAN_SWITCH_ON);
+		rc = configure_iris_xo(dev, cfg->use_48mhz_xo,
+				WCNSS_WLAN_SWITCH_ON);
 		if (rc)
 			goto fail_iris_xo;
+		up(&riva_power_on_lock);
 
 	} else {
-		configure_iris_xo(cfg->use_48mhz_xo, WCNSS_WLAN_SWITCH_OFF);
+		configure_iris_xo(dev, cfg->use_48mhz_xo,
+				WCNSS_WLAN_SWITCH_OFF);
 		wcnss_iris_vregs_off();
 		wcnss_riva_vregs_off();
 	}
@@ -308,7 +349,66 @@ fail_iris_on:
 	wcnss_riva_vregs_off();
 
 fail_riva_on:
+	up(&riva_power_on_lock);
 	return rc;
 }
 EXPORT_SYMBOL(wcnss_wlan_power);
 
+/*
+ * During SSR Riva should not be 'powered on' until all the host drivers
+ * finish their shutdown routines.  Host drivers use below APIs to
+ * synchronize power-on. Riva will not be 'powered on' until all the
+ * requests(to lock power-on) are freed.
+ */
+int req_riva_power_on_lock(char *driver_name)
+{
+	struct host_driver *node;
+
+	if (!driver_name)
+		goto err;
+
+	node = kmalloc(sizeof(struct host_driver), GFP_KERNEL);
+	if (!node)
+		goto err;
+	if (strlcpy(node->name, driver_name, sizeof(node->name))
+			>= sizeof(node->name)) {
+		kfree(node);
+		goto err;
+	}
+
+	mutex_lock(&list_lock);
+	/* Lock when the first request is added */
+	if (list_empty(&power_on_lock_list))
+		down(&riva_power_on_lock);
+	list_add(&node->list, &power_on_lock_list);
+	mutex_unlock(&list_lock);
+
+	return 0;
+
+err:
+	return -EINVAL;
+}
+EXPORT_SYMBOL(req_riva_power_on_lock);
+
+int free_riva_power_on_lock(char *driver_name)
+{
+	int ret = -1;
+	struct host_driver *node;
+
+	mutex_lock(&list_lock);
+	list_for_each_entry(node, &power_on_lock_list, list) {
+		if (!strncmp(node->name, driver_name, sizeof(node->name))) {
+			list_del(&node->list);
+			kfree(node);
+			ret = 0;
+			break;
+		}
+	}
+	/* unlock when the last host driver frees the lock */
+	if (list_empty(&power_on_lock_list))
+		up(&riva_power_on_lock);
+	mutex_unlock(&list_lock);
+
+	return ret;
+}
+EXPORT_SYMBOL(free_riva_power_on_lock);

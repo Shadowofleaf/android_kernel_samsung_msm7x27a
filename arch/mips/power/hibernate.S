@@ -35,7 +35,7 @@ LEAF(swsusp_arch_resume)
 0:
 	PTR_L t1, PBE_ADDRESS(t0)   /* source */
 	PTR_L t2, PBE_ORIG_ADDRESS(t0) /* destination */
-	PTR_ADDIU t3, t1, PAGE_SIZE
+	PTR_ADDU t3, t1, PAGE_SIZE
 1:
 	REG_L t8, (t1)
 	REG_S t8, (t2)
@@ -44,6 +44,7 @@ LEAF(swsusp_arch_resume)
 	bne t1, t3, 1b
 	PTR_L t0, PBE_NEXT(t0)
 	bnez t0, 0b
+	jal local_flush_tlb_all /* Avoid TLB mismatch after kernel resume */
 	PTR_LA t0, saved_regs
 	PTR_L ra, PT_R31(t0)
 	PTR_L sp, PT_R29(t0)

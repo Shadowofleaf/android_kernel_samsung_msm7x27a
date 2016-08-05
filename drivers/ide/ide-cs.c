@@ -41,7 +41,6 @@
 #include <linux/major.h>
 #include <linux/delay.h>
 #include <asm/io.h>
-#include <asm/system.h>
 
 #include <pcmcia/cistpl.h>
 #include <pcmcia/ds.h>
@@ -272,7 +271,7 @@ static void ide_release(struct pcmcia_device *link)
 } /* ide_release */
 
 
-static struct pcmcia_device_id ide_ids[] = {
+static const struct pcmcia_device_id ide_ids[] = {
 	PCMCIA_DEVICE_FUNC_ID(4),
 	PCMCIA_DEVICE_MANF_CARD(0x0000, 0x0000),	/* Corsair */
 	PCMCIA_DEVICE_MANF_CARD(0x0007, 0x0000),	/* Hitachi */

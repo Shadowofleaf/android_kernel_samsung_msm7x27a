@@ -1,6 +1,6 @@
 /* linux/arch/arm/mach-msm/rpc_hsusb.c
  *
- * Copyright (c) 2008-2011, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2008-2012, The Linux Foundation. All rights reserved.
  *
  * All source code in this file is licensed under the following license except
  * where indicated.
@@ -20,6 +20,7 @@
 
 #include <linux/err.h>
 #include <linux/slab.h>
+#include <linux/module.h>
 #include <mach/rpc_hsusb.h>
 #include <asm/mach-types.h>
 
@@ -160,8 +161,7 @@ int msm_chg_rpc_connect(void)
 {
 	uint32_t chg_vers;
 
-	if (machine_is_msm7201a_surf() || machine_is_msm7x27_surf() ||
-	    machine_is_qsd8x50_surf() || machine_is_msm7x25_surf())
+	if (machine_is_msm7x27_surf() || machine_is_qsd8x50_surf())
 		return -ENOTSUPP;
 
 	if (chg_ep && !IS_ERR(chg_ep)) {
@@ -622,7 +622,7 @@ int usb_diag_update_pid_and_serial_num(uint32_t pid, const char *snum)
 }
 
 
-#ifdef CONFIG_USB_GADGET_MSM_72K
+#ifdef CONFIG_USB_MSM_72K
 /* charger api wrappers */
 int hsusb_chg_init(int connect)
 {

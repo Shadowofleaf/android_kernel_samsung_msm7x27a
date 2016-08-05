@@ -8,8 +8,8 @@
  * the Free Software Foundation; either version 2 of the License, or (at
  * your option) any later version.
  */
-#ifndef __SDHCI_H
-#define __SDHCI_H
+#ifndef LINUX_MMC_SDHCI_H
+#define LINUX_MMC_SDHCI_H
 
 #include <linux/scatterlist.h>
 #include <linux/compiler.h>
@@ -85,6 +85,12 @@ struct sdhci_host {
 #define SDHCI_QUIRK_NO_HISPD_BIT			(1<<29)
 /* Controller treats ADMA descriptors with length 0000h incorrectly */
 #define SDHCI_QUIRK_BROKEN_ADMA_ZEROLEN_DESC		(1<<30)
+/* The read-only detection via SDHCI_PRESENT_STATE register is unstable */
+#define SDHCI_QUIRK_UNSTABLE_RO_DETECT			(1<<31)
+
+	unsigned int quirks2;	/* More deviations from spec. */
+
+#define SDHCI_QUIRK2_HOST_OFF_CARD_ON			(1<<0)
 
 	int irq;		/* Device IRQ */
 	void __iomem *ioaddr;	/* Mapped address */
@@ -111,6 +117,11 @@ struct sdhci_host {
 #define SDHCI_DEVICE_DEAD	(1<<3)	/* Device unresponsive */
 #define SDHCI_SDR50_NEEDS_TUNING (1<<4)	/* SDR50 needs tuning */
 #define SDHCI_NEEDS_RETUNING	(1<<5)	/* Host needs retuning */
+#define SDHCI_AUTO_CMD12	(1<<6)	/* Auto CMD12 support */
+#define SDHCI_AUTO_CMD23	(1<<7)	/* Auto CMD23 support */
+#define SDHCI_PV_ENABLED	(1<<8)	/* Preset value enabled */
+#define SDHCI_SDIO_IRQ_ENABLED	(1<<9)	/* SDIO irq enabled */
+#define SDHCI_HS200_NEEDS_TUNING (1<<10)	/* HS200 needs tuning */
 
 	unsigned int version;	/* SDHCI spec. version */
 
@@ -120,6 +131,8 @@ struct sdhci_host {
 
 	unsigned int clock;	/* Current clock (MHz) */
 	u8 pwr;			/* Current voltage */
+
+	bool runtime_suspended;	/* Host is runtime suspended */
 
 	struct mmc_request *mrq;	/* Current request */
 	struct mmc_command *cmd;	/* Current command */
@@ -158,4 +171,4 @@ struct sdhci_host {
 
 	unsigned long private[0] ____cacheline_aligned;
 };
-#endif /* __SDHCI_H */
+#endif /* LINUX_MMC_SDHCI_H */

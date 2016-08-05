@@ -16,7 +16,6 @@
 #ifndef __ARCH_ARM_MACH_OMAP2_CONTROL_H
 #define __ARCH_ARM_MACH_OMAP2_CONTROL_H
 
-#include <mach/io.h>
 #include <mach/ctrl_module_core_44xx.h>
 #include <mach/ctrl_module_wkup_44xx.h>
 #include <mach/ctrl_module_pad_core_44xx.h>
@@ -51,6 +50,9 @@
 #define OMAP343X_CONTROL_MEM_WKUP	0x600
 #define OMAP343X_CONTROL_PADCONFS_WKUP	0xa00
 #define OMAP343X_CONTROL_GENERAL_WKUP	0xa60
+
+/* TI81XX spefic control submodules */
+#define TI81XX_CONTROL_DEVCONF		0x600
 
 /* Control register offsets - read/write with omap_ctrl_{read,write}{bwl}() */
 
@@ -233,13 +235,16 @@
 #define OMAP343X_CONTROL_WKUP_DEBOBS3 (OMAP343X_CONTROL_GENERAL_WKUP + 0x014)
 #define OMAP343X_CONTROL_WKUP_DEBOBS4 (OMAP343X_CONTROL_GENERAL_WKUP + 0x018)
 
-/* 36xx-only RTA - Retention till Accesss control registers and bits */
+/* 36xx-only RTA - Retention till Access control registers and bits */
 #define OMAP36XX_CONTROL_MEM_RTA_CTRL	0x40C
 #define OMAP36XX_RTA_DISABLE		0x0
 
 /* 34xx D2D idle-related pins, handled by PM core */
 #define OMAP3_PADCONF_SAD2D_MSTANDBY   0x250
 #define OMAP3_PADCONF_SAD2D_IDLEACK    0x254
+
+/* TI81XX CONTROL_DEVCONF register offsets */
+#define TI81XX_CONTROL_DEVICE_ID	(TI81XX_CONTROL_DEVCONF + 0x000)
 
 /*
  * REVISIT: This list of registers is not comprehensive - there are more
@@ -333,6 +338,11 @@
 #define AM35XX_VPFE_PCLK_SW_RST		BIT(4)
 
 /*
+ * CONTROL AM33XX STATUS register
+ */
+#define AM33XX_CONTROL_STATUS		0x040
+
+/*
  * CONTROL OMAP STATUS register to identify OMAP3 features
  */
 #define OMAP3_CONTROL_OMAP_STATUS	0x044c
@@ -380,9 +390,9 @@ extern void omap4_ctrl_pad_writel(u32 val, u16 offset);
 
 extern void omap3_save_scratchpad_contents(void);
 extern void omap3_clear_scratchpad_contents(void);
-extern u32 *get_restore_pointer(void);
-extern u32 *get_es3_restore_pointer(void);
-extern u32 *get_omap3630_restore_pointer(void);
+extern void omap3_restore(void);
+extern void omap3_restore_es3(void);
+extern void omap3_restore_3630(void);
 extern u32 omap3_arm_context[128];
 extern void omap3_control_save_context(void);
 extern void omap3_control_restore_context(void);

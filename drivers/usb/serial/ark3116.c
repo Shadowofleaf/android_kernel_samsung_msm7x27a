@@ -37,19 +37,19 @@
 #include <linux/mutex.h>
 #include <linux/spinlock.h>
 
-static int debug;
+static bool debug;
 /*
  * Version information
  */
 
-#define DRIVER_VERSION "v0.6"
+#define DRIVER_VERSION "v0.7"
 #define DRIVER_AUTHOR "Bart Hartgers <bart.hartgers+ark3116@gmail.com>"
 #define DRIVER_DESC "USB ARK3116 serial/IrDA driver"
 #define DRIVER_DEV_DESC "ARK3116 RS232/IrDA"
 #define DRIVER_NAME "ark3116"
 
 /* usb timeout of 1 second */
-#define ARK_TIMEOUT (1*HZ)
+#define ARK_TIMEOUT 1000
 
 static const struct usb_device_id id_table[] = {
 	{ USB_DEVICE(0x6547, 0x0232) },
@@ -68,7 +68,6 @@ static int is_irda(struct usb_serial *serial)
 }
 
 struct ark3116_private {
-	wait_queue_head_t       delta_msr_wait;
 	struct async_icount	icount;
 	int			irda;	/* 1 for irda device */
 
@@ -148,7 +147,6 @@ static int ark3116_attach(struct usb_serial *serial)
 	if (!priv)
 		return -ENOMEM;
 
-	init_waitqueue_head(&priv->delta_msr_wait);
 	mutex_init(&priv->hw_lock);
 	spin_lock_init(&priv->status_lock);
 
@@ -380,10 +378,6 @@ static int ark3116_open(struct tty_struct *tty, struct usb_serial_port *port)
 		goto err_out;
 	}
 
-	/* setup termios */
-	if (tty)
-		ark3116_set_termios(tty, port, NULL);
-
 	/* remove any data still left: also clears error state */
 	ark3116_read_reg(serial, UART_RX, buf);
 
@@ -405,6 +399,10 @@ static int ark3116_open(struct tty_struct *tty, struct usb_serial_port *port)
 
 	/* enable DMA */
 	ark3116_write_reg(port->serial, UART_FCR, UART_FCR_DMA_SELECT);
+
+	/* setup termios */
+	if (tty)
+		ark3116_set_termios(tty, port, NULL);
 
 err_out:
 	kfree(buf);
@@ -431,7 +429,7 @@ static int ark3116_get_icount(struct tty_struct *tty,
 	return 0;
 }
 
-static int ark3116_ioctl(struct tty_struct *tty, struct file *file,
+static int ark3116_ioctl(struct tty_struct *tty,
 			 unsigned int cmd, unsigned long arg)
 {
 	struct usb_serial_port *port = tty->driver_data;
@@ -460,10 +458,14 @@ static int ark3116_ioctl(struct tty_struct *tty, struct file *file,
 	case TIOCMIWAIT:
 		for (;;) {
 			struct async_icount prev = priv->icount;
-			interruptible_sleep_on(&priv->delta_msr_wait);
+			interruptible_sleep_on(&port->delta_msr_wait);
 			/* see if a signal did it */
 			if (signal_pending(current))
 				return -ERESTARTSYS;
+
+			if (port->serial->disconnected)
+				return -EIO;
+
 			if ((prev.rng == priv->icount.rng) &&
 			    (prev.dsr == priv->icount.dsr) &&
 			    (prev.dcd == priv->icount.dcd) &&
@@ -485,7 +487,7 @@ static int ark3116_ioctl(struct tty_struct *tty, struct file *file,
 	return -ENOIOCTLCMD;
 }
 
-static int ark3116_tiocmget(struct tty_struct *tty, struct file *file)
+static int ark3116_tiocmget(struct tty_struct *tty)
 {
 	struct usb_serial_port *port = tty->driver_data;
 	struct ark3116_private *priv = usb_get_serial_port_data(port);
@@ -511,7 +513,7 @@ static int ark3116_tiocmget(struct tty_struct *tty, struct file *file)
 		(ctrl   & UART_MCR_OUT2 ? TIOCM_OUT2 : 0);
 }
 
-static int ark3116_tiocmset(struct tty_struct *tty, struct file *file,
+static int ark3116_tiocmset(struct tty_struct *tty,
 			unsigned set, unsigned clr)
 {
 	struct usb_serial_port *port = tty->driver_data;
@@ -584,7 +586,7 @@ static void ark3116_update_msr(struct usb_serial_port *port, __u8 msr)
 			priv->icount.dcd++;
 		if (msr & UART_MSR_TERI)
 			priv->icount.rng++;
-		wake_up_interruptible(&priv->delta_msr_wait);
+		wake_up_interruptible(&port->delta_msr_wait);
 	}
 }
 
@@ -719,7 +721,6 @@ static struct usb_driver ark3116_driver = {
 	.probe =	usb_serial_probe,
 	.disconnect =	usb_serial_disconnect,
 	.id_table =	id_table,
-	.no_dynamic_id =	1,
 };
 
 static struct usb_serial_driver ark3116_device = {
@@ -728,7 +729,6 @@ static struct usb_serial_driver ark3116_device = {
 		.name =		"ark3116",
 	},
 	.id_table =		id_table,
-	.usb_driver =		&ark3116_driver,
 	.num_ports =		1,
 	.attach =		ark3116_attach,
 	.release =		ark3116_release,
@@ -745,32 +745,12 @@ static struct usb_serial_driver ark3116_device = {
 	.process_read_urb =	ark3116_process_read_urb,
 };
 
-static int __init ark3116_init(void)
-{
-	int retval;
+static struct usb_serial_driver * const serial_drivers[] = {
+	&ark3116_device, NULL
+};
 
-	retval = usb_serial_register(&ark3116_device);
-	if (retval)
-		return retval;
-	retval = usb_register(&ark3116_driver);
-	if (retval == 0) {
-		printk(KERN_INFO "%s:"
-		       DRIVER_VERSION ":"
-		       DRIVER_DESC "\n",
-		       KBUILD_MODNAME);
-	} else
-		usb_serial_deregister(&ark3116_device);
-	return retval;
-}
+module_usb_serial_driver(ark3116_driver, serial_drivers);
 
-static void __exit ark3116_exit(void)
-{
-	usb_deregister(&ark3116_driver);
-	usb_serial_deregister(&ark3116_device);
-}
-
-module_init(ark3116_init);
-module_exit(ark3116_exit);
 MODULE_LICENSE("GPL");
 
 MODULE_AUTHOR(DRIVER_AUTHOR);

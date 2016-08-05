@@ -3,7 +3,7 @@
  *
  * Copyright (C) 2008 Google, Inc.
  * Copyright (C) 2008 HTC Corporation
- * Copyright (c) 2009-2011, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2009-2012, The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -32,13 +32,13 @@
 
 #include <mach/msm_adsp.h>
 #include <mach/iommu.h>
-#include <mach/msm_subsystem_map.h>
 #include <mach/iommu_domains.h>
 #include <mach/qdsp5v2/qdsp5audreccmdi.h>
 #include <mach/qdsp5v2/qdsp5audrecmsg.h>
 #include <mach/qdsp5v2/audpreproc.h>
 #include <mach/qdsp5v2/audio_dev_ctl.h>
 #include <mach/debug_mm.h>
+#include <mach/socinfo.h>
 
 /* FRAME_NUM must be a power of two */
 #define FRAME_NUM		(8)
@@ -96,8 +96,8 @@ struct audio_in {
 	wait_queue_head_t write_wait;
 	int32_t out_phys; /* physical address of write buffer */
 	char *out_data;
-	struct msm_mapped_buffer *map_v_read;
-	struct msm_mapped_buffer *map_v_write;
+	void *map_v_read;
+	void *map_v_write;
 
 	int mfield; /* meta field embedded in data */
 	int wflush; /*write flush */
@@ -141,6 +141,7 @@ struct audio_in {
 	int running;
 	int stopped; /* set when stopped, cleared on flush */
 	int abort; /* set when error, like sample rate mismatch */
+	char *build_id;
 };
 
 struct audio_frame {
@@ -573,7 +574,13 @@ static int audaac_in_enc_config(struct audio_in *audio, int enable)
 {
 	struct audpreproc_audrec_cmd_enc_cfg cmd;
 	memset(&cmd, 0, sizeof(cmd));
-	cmd.cmd_id = AUDPREPROC_AUDREC_CMD_ENC_CFG_2;
+	if (audio->build_id[17] == '1') {
+		cmd.cmd_id = AUDPREPROC_AUDREC_CMD_ENC_CFG_2;
+		MM_ERR("sending AUDPREPROC_AUDREC_CMD_ENC_CFG_2 command");
+	} else {
+		cmd.cmd_id = AUDPREPROC_AUDREC_CMD_ENC_CFG;
+		MM_ERR("sending AUDPREPROC_AUDREC_CMD_ENC_CFG command");
+	}
 	cmd.stream_id = audio->enc_id;
 
 	if (enable)
@@ -1101,7 +1108,7 @@ static void audpreproc_pcm_send_data(struct audio_in *audio, unsigned needed)
 }
 
 
-static int audaac_in_fsync(struct file *file,	int datasync)
+static int audaac_in_fsync(struct file *file, loff_t ppos1, loff_t ppos2, int datasync)
 
 {
 	struct audio_in *audio = file->private_data;
@@ -1284,12 +1291,12 @@ static int audaac_in_release(struct inode *inode, struct file *file)
 	audio->audrec = NULL;
 	audio->opened = 0;
 	if (audio->data) {
-		msm_subsystem_unmap_buffer(audio->map_v_read);
+		iounmap(audio->map_v_read);
 		free_contiguous_memory_by_paddr(audio->phys);
 		audio->data = NULL;
 	}
 	if (audio->out_data) {
-		msm_subsystem_unmap_buffer(audio->map_v_write);
+		iounmap(audio->map_v_write);
 		free_contiguous_memory_by_paddr(audio->out_phys);
 		audio->out_data = NULL;
 	}
@@ -1312,16 +1319,14 @@ static int audaac_in_open(struct inode *inode, struct file *file)
 	}
 	audio->phys = allocate_contiguous_ebi_nomap(DMASZ, SZ_4K);
 	if (audio->phys) {
-		audio->map_v_read = msm_subsystem_map_buffer(
-					audio->phys, DMASZ,
-					MSM_SUBSYSTEM_MAP_KADDR, NULL, 0);
+		audio->map_v_read = ioremap(audio->phys, DMASZ);
 		if (IS_ERR(audio->map_v_read)) {
 			MM_ERR("could not map DMA buffers\n");
 			rc = -ENOMEM;
 			free_contiguous_memory_by_paddr(audio->phys);
 			goto done;
 		}
-		audio->data = audio->map_v_read->vaddr;
+		audio->data = audio->map_v_read;
 	} else {
 		MM_ERR("could not allocate DMA buffers\n");
 		rc = -ENOMEM;
@@ -1390,19 +1395,20 @@ static int audaac_in_open(struct inode *inode, struct file *file)
 		rc = -ENOMEM;
 		goto evt_error;
 	} else {
-		audio->map_v_write = msm_subsystem_map_buffer(
-					audio->out_phys, BUFFER_SIZE,
-					MSM_SUBSYSTEM_MAP_KADDR, NULL, 0);
+		audio->map_v_write = ioremap(
+					audio->out_phys, BUFFER_SIZE);
 		if (IS_ERR(audio->map_v_write)) {
 			MM_ERR("could not map write phys address\n");
 			rc = -ENOMEM;
 			free_contiguous_memory_by_paddr(audio->out_phys);
 			goto evt_error;
 		}
-		audio->out_data = audio->map_v_write->vaddr;
+		audio->out_data = audio->map_v_write;
 		MM_DBG("write buf: phy addr 0x%08x kernel addr 0x%08x\n",
 				audio->out_phys, (int)audio->out_data);
 	}
+	audio->build_id = socinfo_get_build_id();
+	MM_DBG("Modem build id = %s\n", audio->build_id);
 
 		/* Initialize buffer */
 	audio->out[0].data = audio->out_data + 0;
@@ -1424,7 +1430,7 @@ static int audaac_in_open(struct inode *inode, struct file *file)
 					aac_in_listener, (void *) audio);
 	if (rc) {
 		MM_ERR("failed to register device event listener\n");
-		msm_subsystem_unmap_buffer(audio->map_v_write);
+		iounmap(audio->map_v_write);
 		free_contiguous_memory_by_paddr(audio->out_phys);
 		goto evt_error;
 	}

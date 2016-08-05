@@ -25,6 +25,7 @@
  */
 
 #define SDHCI_DMA_ADDRESS	0x00
+#define SDHCI_ARGUMENT2		SDHCI_DMA_ADDRESS
 
 #define SDHCI_BLOCK_SIZE	0x04
 #define  SDHCI_MAKE_BLKSZ(dma, blksz) (((dma & 0x7) << 12) | (blksz & 0xFFF))
@@ -36,7 +37,8 @@
 #define SDHCI_TRANSFER_MODE	0x0C
 #define  SDHCI_TRNS_DMA		0x01
 #define  SDHCI_TRNS_BLK_CNT_EN	0x02
-#define  SDHCI_TRNS_ACMD12	0x04
+#define  SDHCI_TRNS_AUTO_CMD12	0x04
+#define  SDHCI_TRNS_AUTO_CMD23	0x08
 #define  SDHCI_TRNS_READ	0x10
 #define  SDHCI_TRNS_MULTI	0x20
 
@@ -45,6 +47,7 @@
 #define  SDHCI_CMD_CRC		0x08
 #define  SDHCI_CMD_INDEX	0x10
 #define  SDHCI_CMD_DATA		0x20
+#define  SDHCI_CMD_ABORTCMD	0xC0
 
 #define  SDHCI_CMD_RESP_NONE	0x00
 #define  SDHCI_CMD_RESP_LONG	0x01
@@ -155,6 +158,7 @@
 #define   SDHCI_CTRL_UHS_SDR50		0x0002
 #define   SDHCI_CTRL_UHS_SDR104		0x0003
 #define   SDHCI_CTRL_UHS_DDR50		0x0004
+#define   SDHCI_CTRL_HS_SDR200		0x0005 /* reserved value in SDIO spec */
 #define  SDHCI_CTRL_VDD_180		0x0008
 #define  SDHCI_CTRL_DRV_TYPE_MASK	0x0030
 #define   SDHCI_CTRL_DRV_TYPE_B		0x0000
@@ -240,6 +244,12 @@
 #define SDHCI_MAX_DIV_SPEC_200	256
 #define SDHCI_MAX_DIV_SPEC_300	2046
 
+/*
+ * Host SDMA buffer boundary. Valid values from 4K to 512K in powers of 2.
+ */
+#define SDHCI_DEFAULT_BOUNDARY_SIZE  (512 * 1024)
+#define SDHCI_DEFAULT_BOUNDARY_ARG   (ilog2(SDHCI_DEFAULT_BOUNDARY_SIZE) - 12)
+
 struct sdhci_ops {
 #ifdef CONFIG_MMC_SDHCI_IO_ACCESSORS
 	u32		(*read_l)(struct sdhci_host *host, int reg);
@@ -261,6 +271,12 @@ struct sdhci_ops {
 	void (*platform_send_init_74_clocks)(struct sdhci_host *host,
 					     u8 power_mode);
 	unsigned int    (*get_ro)(struct sdhci_host *host);
+	void	(*platform_reset_enter)(struct sdhci_host *host, u8 mask);
+	void	(*platform_reset_exit)(struct sdhci_host *host, u8 mask);
+	int	(*set_uhs_signaling)(struct sdhci_host *host, unsigned int uhs);
+	void	(*hw_reset)(struct sdhci_host *host);
+	void	(*platform_suspend)(struct sdhci_host *host);
+	void	(*platform_resume)(struct sdhci_host *host);
 };
 
 #ifdef CONFIG_MMC_SDHCI_IO_ACCESSORS
@@ -361,9 +377,14 @@ extern int sdhci_add_host(struct sdhci_host *host);
 extern void sdhci_remove_host(struct sdhci_host *host, int dead);
 
 #ifdef CONFIG_PM
-extern int sdhci_suspend_host(struct sdhci_host *host, pm_message_t state);
+extern int sdhci_suspend_host(struct sdhci_host *host);
 extern int sdhci_resume_host(struct sdhci_host *host);
 extern void sdhci_enable_irq_wakeups(struct sdhci_host *host);
+#endif
+
+#ifdef CONFIG_PM_RUNTIME
+extern int sdhci_runtime_suspend_host(struct sdhci_host *host);
+extern int sdhci_runtime_resume_host(struct sdhci_host *host);
 #endif
 
 #endif /* __SDHCI_HW_H */

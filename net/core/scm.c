@@ -28,7 +28,6 @@
 #include <linux/nsproxy.h>
 #include <linux/slab.h>
 
-#include <asm/system.h>
 #include <asm/uaccess.h>
 
 #include <net/protocol.h>
@@ -95,7 +94,7 @@ static int scm_fp_copy(struct cmsghdr *cmsg, struct scm_fp_list **fplp)
 		int fd = fdp[i];
 		struct file *file;
 
-		if (fd < 0 || !(file = fget(fd)))
+		if (fd < 0 || !(file = fget_raw(fd)))
 			return -EBADF;
 		*fpp++ = file;
 		fpl->count++;
@@ -173,7 +172,7 @@ int __scm_send(struct socket *sock, struct msghdr *msg, struct scm_cookie *p)
 			if (err)
 				goto error;
 
-			if (pid_vnr(p->pid) != p->creds.pid) {
+			if (!p->pid || pid_vnr(p->pid) != p->creds.pid) {
 				struct pid *pid;
 				err = -ESRCH;
 				pid = find_get_pid(p->creds.pid);
@@ -183,8 +182,9 @@ int __scm_send(struct socket *sock, struct msghdr *msg, struct scm_cookie *p)
 				p->pid = pid;
 			}
 
-			if ((p->cred->euid != p->creds.uid) ||
-				(p->cred->egid != p->creds.gid)) {
+			if (!p->cred ||
+			    (p->cred->euid != p->creds.uid) ||
+			    (p->cred->egid != p->creds.gid)) {
 				struct cred *cred;
 				err = -ENOMEM;
 				cred = prepare_creds();
@@ -192,8 +192,9 @@ int __scm_send(struct socket *sock, struct msghdr *msg, struct scm_cookie *p)
 					goto error;
 
 				cred->uid = cred->euid = p->creds.uid;
-				cred->gid = cred->egid = p->creds.uid;
-				put_cred(p->cred);
+				cred->gid = cred->egid = p->creds.gid;
+				if (p->cred)
+					put_cred(p->cred);
 				p->cred = cred;
 			}
 			break;

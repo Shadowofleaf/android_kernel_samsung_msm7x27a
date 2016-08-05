@@ -93,7 +93,7 @@ static inline int cx231xx_isoc_vbi_copy(struct cx231xx *dev, struct urb *urb)
 	if (!dev)
 		return 0;
 
-	if ((dev->state & DEV_DISCONNECTED) || (dev->state & DEV_MISCONFIGURED))
+	if (dev->state & DEV_DISCONNECTED)
 		return 0;
 
 	if (urb->status < 0) {
@@ -631,7 +631,7 @@ static inline void get_next_vbi_buf(struct cx231xx_dmaqueue *dma_q,
 	/* Get the next buffer */
 	*buf = list_entry(dma_q->active.next, struct cx231xx_buffer, vb.queue);
 
-	/* Cleans up buffer - Usefull for testing for frame/URB loss */
+	/* Cleans up buffer - Useful for testing for frame/URB loss */
 	outp = videobuf_to_vmalloc(&(*buf)->vb);
 	memset(outp, 0, (*buf)->vb.size);
 

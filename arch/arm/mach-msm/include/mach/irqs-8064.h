@@ -1,4 +1,4 @@
-/* Copyright (c) 2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -57,7 +57,7 @@
 #define TLMM_MSM_DIR_CONN_IRQ_8			(GIC_SPI_START + 12)
 #define TLMM_MSM_DIR_CONN_IRQ_9			(GIC_SPI_START + 13)
 #define PM8921_SEC_IRQ_N			(GIC_SPI_START + 14)
-#define PM8018_SEC_IRQ_N			(GIC_SPI_START + 15)
+#define PM8821_SEC_IRQ_N			(GIC_SPI_START + 15)
 #define TLMM_MSM_SUMMARY_IRQ			(GIC_SPI_START + 16)
 #define SPDM_RT_1_IRQ				(GIC_SPI_START + 17)
 #define SPDM_DIAG_IRQ				(GIC_SPI_START + 18)
@@ -280,44 +280,34 @@
 #define	CS3_BAM_XPU_IRQ				(GIC_SPI_START + 234)
 #define	CE3_IRQ					(GIC_SPI_START + 235)
 #define	SMMU_VCAP_CB_SC_SECURE_IRQ		(GIC_SPI_START + 236)
-#define	SMMU_VCAM_CP_SC_NON_SECURE_IRQ		(GIC_SPI_START + 237)
+#define	SMMU_VCAP_CB_SC_NON_SECURE_IRQ		(GIC_SPI_START + 237)
 #define	PCIE20_INT_MSI				(GIC_SPI_START + 238)
 #define	PCIE20_INTA				(GIC_SPI_START + 239)
 #define	PCIE20_INTB				(GIC_SPI_START + 240)
 #define	PCIE20_INTC				(GIC_SPI_START + 241)
 #define	PCIE20_INTD				(GIC_SPI_START + 242)
 #define	PCIE20_INT_PLS_HP			(GIC_SPI_START + 243)
-#define	PCIE20_INT_PLS_PME			(GIC_SPI_START + 244)
-#define	PCIE20_INT_LINK_UP			(GIC_SPI_START + 245)
-#define	PCIE20_INT_LINK_DOWN			(GIC_SPI_START + 246)
-#define	PCIE20_INT_HP_LEGACY			(GIC_SPI_START + 247)
-#define	PCIE20_AER_LEGACY			(GIC_SPI_START + 248)
-#define	PCIE20_INT_PME_LEGACY			(GIC_SPI_START + 249)
-#define	PCIE20_INT_BRIDGE_FLUSH_N		(GIC_SPI_START + 250)
+#define	PCIE20_INT_PLS_ERR			(GIC_SPI_START + 244)
+#define	PCIE20_INT_PLS_PME			(GIC_SPI_START + 245)
+#define	PCIE20_INT_LINK_UP			(GIC_SPI_START + 246)
+#define	PCIE20_INT_LINK_DOWN			(GIC_SPI_START + 247)
+#define	PCIE20_INT_HP_LEGACY			(GIC_SPI_START + 248)
+#define	PCIE20_INT_AER_LEGACY			(GIC_SPI_START + 249)
+#define	PCIE20_INT_PME_LEGACY			(GIC_SPI_START + 250)
+#define	PCIE20_INT_BRIDGE_FLUSH_N		(GIC_SPI_START + 251)
 
 /* Backwards compatible IRQ macros. */
 #define INT_ADM_AARM				ADM_0_SCSS_0_IRQ
 
-/*
- * For now, use the maximum number of interrupts until a pending GIC issue
- * is sorted out
- */
-#define NR_MSM_IRQS 256
-#define NR_GPIO_IRQS 150
-#define NR_PM8921_IRQS 256
-#define NR_TABLA_IRQS 49
-#define NR_BOARD_IRQS (NR_PM8921_IRQS + NR_TABLA_IRQS)
-#define NR_TLMM_MSM_DIR_CONN_IRQ 8 /*Need to Verify this Count*/
-#define NR_MSM_GPIOS NR_GPIO_IRQS
-
 /* smd/smsm interrupts */
-#define INT_A9_M2A_0                    MSS_TO_APPS_IRQ_0
-#define INT_A9_M2A_5                    MSS_TO_APPS_IRQ_1
-#define INT_ADSP_A11                    LPASS_SCSS_GP_HIGH_IRQ
-#define INT_ADSP_A11_SMSM               LPASS_SCSS_GP_MEDIUM_IRQ
-#define INT_DSPS_A11                    SPS_MTI_31
-#define INT_WCNSS_A11                   RIVA_APSS_SPARE_IRQ
-#define INT_WCNSS_A11_SMSM              RIVA_APPS_WLAN_SMSM_IRQ
+#define INT_A9_M2A_0		(GIC_SPI_START + 37) /*GSS_TO_APPS_IRQ_0*/
+#define INT_A9_M2A_5		(GIC_SPI_START + 38) /*GSS_TO_APPS_IRQ_1*/
+#define INT_ADSP_A11		LPASS_SCSS_GP_HIGH_IRQ
+#define INT_ADSP_A11_SMSM	LPASS_SCSS_GP_MEDIUM_IRQ
+#define INT_DSPS_A11		SPS_MTI_31
+#define INT_DSPS_A11_SMSM	SPS_MTI_30
+#define INT_WCNSS_A11		RIVA_APSS_SPARE_IRQ
+#define INT_WCNSS_A11_SMSM	RIVA_APPS_WLAN_SMSM_IRQ
 
 #endif
 

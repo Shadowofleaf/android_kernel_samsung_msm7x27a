@@ -10,24 +10,26 @@
  */
 
 #include <linux/dma-mapping.h>
+#include <linux/gpio.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/platform_device.h>
-#include <linux/io.h>
 #include <linux/spi/spi.h>
 
-#include <mach/camera.h>
-#include <mach/hardware.h>
 #include <asm/mach/map.h>
 
 #include <plat/tc.h>
 #include <plat/board.h>
 #include <plat/mux.h>
-#include <mach/gpio.h>
 #include <plat/mmc.h>
 #include <plat/omap7xx.h>
-#include <plat/mcbsp.h>
+
+#include <mach/camera.h>
+#include <mach/hardware.h>
+
+#include "common.h"
+#include "clock.h"
 
 /*-------------------------------------------------------------------------*/
 
@@ -247,16 +249,8 @@ static struct platform_device omap_pcm = {
 	.id	= -1,
 };
 
-OMAP_MCBSP_PLATFORM_DEVICE(1);
-OMAP_MCBSP_PLATFORM_DEVICE(2);
-OMAP_MCBSP_PLATFORM_DEVICE(3);
-
 static void omap_init_audio(void)
 {
-	platform_device_register(&omap_mcbsp1);
-	platform_device_register(&omap_mcbsp2);
-	if (!cpu_is_omap7xx())
-		platform_device_register(&omap_mcbsp3);
 	platform_device_register(&omap_pcm);
 }
 
@@ -281,7 +275,7 @@ static inline void omap_init_audio(void) {}
  * Claiming GPIOs, and setting their direction and initial values, is the
  * responsibility of the device drivers.  So is responding to probe().
  *
- * Board-specific knowlege like creating devices or pin setup is to be
+ * Board-specific knowledge like creating devices or pin setup is to be
  * kept out of drivers as much as possible.  In particular, pin setup
  * may be handled by the boot loader, and drivers should expect it will
  * normally have been done by the time they're probed.
@@ -290,6 +284,9 @@ static int __init omap1_init_devices(void)
 {
 	if (!cpu_class_is_omap1())
 		return -ENODEV;
+
+	omap_sram_init();
+	omap1_clk_late_init();
 
 	/* please keep these calls, and their implementations above,
 	 * in alphabetical order so they're easier to sort through.

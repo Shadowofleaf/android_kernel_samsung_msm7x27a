@@ -1,29 +1,13 @@
-/* Copyright (c) 2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- *       copyright notice, this list of conditions and the following
- *       disclaimer in the documentation and/or other materials provided
- *       with the distribution.
- *     * Neither the name of Code Aurora Forum, Inc. nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
  *
- * THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
- * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
- * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
- * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
- * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  *
  */
 
@@ -34,37 +18,32 @@
 
 #define SUBSYS_NAME_MAX_LENGTH 40
 
+struct subsys_device;
+
 enum {
 	RESET_SOC = 1,
 	RESET_SUBSYS_COUPLED,
 	RESET_SUBSYS_INDEPENDENT,
-	RESET_SUBSYS_MIXED = 25,
 	RESET_LEVEL_MAX
 };
 
-struct subsys_data {
+struct subsys_desc {
 	const char *name;
-	int (*shutdown) (const struct subsys_data *);
-	int (*powerup) (const struct subsys_data *);
-	void (*crash_shutdown) (const struct subsys_data *);
-	int (*ramdump) (int, const struct subsys_data *);
 
-	/* Internal use only */
-	struct list_head list;
-	void *notif_handle;
-
-	struct mutex shutdown_lock;
-	struct mutex powerup_lock;
-
-	void *restart_order;
-	struct subsys_data *single_restart_list[1];
+	int (*shutdown)(const struct subsys_desc *desc);
+	int (*powerup)(const struct subsys_desc *desc);
+	void (*crash_shutdown)(const struct subsys_desc *desc);
+	int (*ramdump)(int, const struct subsys_desc *desc);
 };
 
 #if defined(CONFIG_MSM_SUBSYSTEM_RESTART)
 
-int get_restart_level(void);
-int subsystem_restart(const char *subsys_name);
-int ssr_register_subsystem(struct subsys_data *subsys);
+extern int get_restart_level(void);
+extern int subsystem_restart_dev(struct subsys_device *dev);
+extern int subsystem_restart(const char *name);
+
+extern struct subsys_device *subsys_register(struct subsys_desc *desc);
+extern void subsys_unregister(struct subsys_device *dev);
 
 #else
 
@@ -73,15 +52,23 @@ static inline int get_restart_level(void)
 	return 0;
 }
 
-static inline int subsystem_restart(const char *subsystem_name)
+static inline int subsystem_restart_dev(struct subsys_device *dev)
 {
 	return 0;
 }
 
-static inline int ssr_register_subsystem(struct subsys_data *subsys)
+static inline int subsystem_restart(const char *name)
 {
 	return 0;
 }
+
+static inline
+struct subsys_device *subsys_register(struct subsys_desc *desc)
+{
+	return NULL;
+}
+
+static inline void subsys_unregister(struct subsys_device *dev) { }
 
 #endif /* CONFIG_MSM_SUBSYSTEM_RESTART */
 

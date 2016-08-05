@@ -300,13 +300,8 @@ clusterip_tg(struct sk_buff *skb, const struct xt_action_param *par)
 	 * that the ->target() function isn't called after ->destroy() */
 
 	ct = nf_ct_get(skb, &ctinfo);
-	if (ct == NULL) {
-		pr_info("no conntrack!\n");
-			/* FIXME: need to drop invalid ones, since replies
-			 * to outgoing connections of other nodes will be
-			 * marked as INVALID */
+	if (ct == NULL)
 		return NF_DROP;
-	}
 
 	/* special case: ICMP error handling. conntrack distinguishes between
 	 * error messages (RELATED) and information requests (see below) */
@@ -322,19 +317,19 @@ clusterip_tg(struct sk_buff *skb, const struct xt_action_param *par)
 	hash = clusterip_hashfn(skb, cipinfo->config);
 
 	switch (ctinfo) {
-		case IP_CT_NEW:
-			ct->mark = hash;
-			break;
-		case IP_CT_RELATED:
-		case IP_CT_RELATED_REPLY:
-			/* FIXME: we don't handle expectations at the
-			 * moment.  they can arrive on a different node than
-			 * the master connection (e.g. FTP passive mode) */
-		case IP_CT_ESTABLISHED:
-		case IP_CT_ESTABLISHED_REPLY:
-			break;
-		default:
-			break;
+	case IP_CT_NEW:
+		ct->mark = hash;
+		break;
+	case IP_CT_RELATED:
+	case IP_CT_RELATED_REPLY:
+		/* FIXME: we don't handle expectations at the moment.
+		 * They can arrive on a different node than
+		 * the master connection (e.g. FTP passive mode) */
+	case IP_CT_ESTABLISHED:
+	case IP_CT_ESTABLISHED_REPLY:
+		break;
+	default:			/* Prevent gcc warnings */
+		break;
 	}
 
 #ifdef DEBUG
@@ -400,7 +395,6 @@ static int clusterip_tg_check(const struct xt_tgchk_param *par)
 			config = clusterip_config_init(cipinfo,
 							e->ip.dst.s_addr, dev);
 			if (!config) {
-				pr_info("cannot allocate config\n");
 				dev_put(dev);
 				return -ENOMEM;
 			}

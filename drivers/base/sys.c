@@ -28,6 +28,7 @@
 #define to_sysdev(k) container_of(k, struct sys_device, kobj)
 #define to_sysdev_attr(a) container_of(a, struct sysdev_attribute, attr)
 
+extern struct kset *system_kset;
 
 static ssize_t
 sysdev_show(struct kobject *kobj, struct attribute *attr, char *buffer)
@@ -126,8 +127,6 @@ void sysdev_class_remove_file(struct sysdev_class *c,
 }
 EXPORT_SYMBOL_GPL(sysdev_class_remove_file);
 
-static struct kset *system_kset;
-
 int sysdev_class_register(struct sysdev_class *cls)
 {
 	int retval;
@@ -166,8 +165,38 @@ EXPORT_SYMBOL_GPL(sysdev_class_unregister);
 
 static DEFINE_MUTEX(sysdev_drivers_lock);
 
+/*
+ * @dev != NULL means that we're unwinding because some drv->add()
+ * failed for some reason. You need to grab sysdev_drivers_lock before
+ * calling this.
+ */
+static void __sysdev_driver_remove(struct sysdev_class *cls,
+				   struct sysdev_driver *drv,
+				   struct sys_device *from_dev)
+{
+	struct sys_device *dev = from_dev;
+
+	list_del_init(&drv->entry);
+	if (!cls)
+		return;
+
+	if (!drv->remove)
+		goto kset_put;
+
+	if (dev)
+		list_for_each_entry_continue_reverse(dev, &cls->kset.list,
+						     kobj.entry)
+			drv->remove(dev);
+	else
+		list_for_each_entry(dev, &cls->kset.list, kobj.entry)
+			drv->remove(dev);
+
+kset_put:
+	kset_put(&cls->kset);
+}
+
 /**
- *	sysdev_driver_register - Register auxillary driver
+ *	sysdev_driver_register - Register auxiliary driver
  *	@cls:	Device class driver belongs to.
  *	@drv:	Driver.
  *
@@ -175,14 +204,14 @@ static DEFINE_MUTEX(sysdev_drivers_lock);
  *	called on each operation on devices of that class. The refcount
  *	of @cls is incremented.
  */
-
 int sysdev_driver_register(struct sysdev_class *cls, struct sysdev_driver *drv)
 {
+	struct sys_device *dev = NULL;
 	int err = 0;
 
 	if (!cls) {
-		WARN(1, KERN_WARNING "sysdev: invalid class passed to "
-			"sysdev_driver_register!\n");
+		WARN(1, KERN_WARNING "sysdev: invalid class passed to %s!\n",
+			__func__);
 		return -EINVAL;
 	}
 
@@ -198,21 +227,29 @@ int sysdev_driver_register(struct sysdev_class *cls, struct sysdev_driver *drv)
 
 		/* If devices of this class already exist, tell the driver */
 		if (drv->add) {
-			struct sys_device *dev;
-			list_for_each_entry(dev, &cls->kset.list, kobj.entry)
-				drv->add(dev);
+			list_for_each_entry(dev, &cls->kset.list, kobj.entry) {
+				err = drv->add(dev);
+				if (err)
+					goto unwind;
+			}
 		}
 	} else {
 		err = -EINVAL;
 		WARN(1, KERN_ERR "%s: invalid device class\n", __func__);
 	}
+
+	goto unlock;
+
+unwind:
+	__sysdev_driver_remove(cls, drv, dev);
+
+unlock:
 	mutex_unlock(&sysdev_drivers_lock);
 	return err;
 }
 
-
 /**
- *	sysdev_driver_unregister - Remove an auxillary driver.
+ *	sysdev_driver_unregister - Remove an auxiliary driver.
  *	@cls:	Class driver belongs to.
  *	@drv:	Driver.
  */
@@ -220,22 +257,11 @@ void sysdev_driver_unregister(struct sysdev_class *cls,
 			      struct sysdev_driver *drv)
 {
 	mutex_lock(&sysdev_drivers_lock);
-	list_del_init(&drv->entry);
-	if (cls) {
-		if (drv->remove) {
-			struct sys_device *dev;
-			list_for_each_entry(dev, &cls->kset.list, kobj.entry)
-				drv->remove(dev);
-		}
-		kset_put(&cls->kset);
-	}
+	__sysdev_driver_remove(cls, drv, NULL);
 	mutex_unlock(&sysdev_drivers_lock);
 }
-
 EXPORT_SYMBOL_GPL(sysdev_driver_register);
 EXPORT_SYMBOL_GPL(sysdev_driver_unregister);
-
-
 
 /**
  *	sysdev_register - add a system device to the tree
@@ -275,7 +301,7 @@ int sysdev_register(struct sys_device *sysdev)
 		 * code that should have called us.
 		 */
 
-		/* Notify class auxillary drivers */
+		/* Notify class auxiliary drivers */
 		list_for_each_entry(drv, &cls->drivers, entry) {
 			if (drv->add)
 				drv->add(sysdev);
@@ -299,211 +325,6 @@ void sysdev_unregister(struct sys_device *sysdev)
 	mutex_unlock(&sysdev_drivers_lock);
 
 	kobject_put(&sysdev->kobj);
-}
-
-
-
-/**
- *	sysdev_shutdown - Shut down all system devices.
- *
- *	Loop over each class of system devices, and the devices in each
- *	of those classes. For each device, we call the shutdown method for
- *	each driver registered for the device - the auxillaries,
- *	and the class driver.
- *
- *	Note: The list is iterated in reverse order, so that we shut down
- *	child devices before we shut down their parents. The list ordering
- *	is guaranteed by virtue of the fact that child devices are registered
- *	after their parents.
- */
-void sysdev_shutdown(void)
-{
-	struct sysdev_class *cls;
-
-	pr_debug("Shutting Down System Devices\n");
-
-	mutex_lock(&sysdev_drivers_lock);
-	list_for_each_entry_reverse(cls, &system_kset->list, kset.kobj.entry) {
-		struct sys_device *sysdev;
-
-		pr_debug("Shutting down type '%s':\n",
-			 kobject_name(&cls->kset.kobj));
-
-		list_for_each_entry(sysdev, &cls->kset.list, kobj.entry) {
-			struct sysdev_driver *drv;
-			pr_debug(" %s\n", kobject_name(&sysdev->kobj));
-
-			/* Call auxillary drivers first */
-			list_for_each_entry(drv, &cls->drivers, entry) {
-				if (drv->shutdown)
-					drv->shutdown(sysdev);
-			}
-
-			/* Now call the generic one */
-			if (cls->shutdown)
-				cls->shutdown(sysdev);
-		}
-	}
-	mutex_unlock(&sysdev_drivers_lock);
-}
-
-static void __sysdev_resume(struct sys_device *dev)
-{
-	struct sysdev_class *cls = dev->cls;
-	struct sysdev_driver *drv;
-
-	/* First, call the class-specific one */
-	if (cls->resume)
-		cls->resume(dev);
-	WARN_ONCE(!irqs_disabled(),
-		"Interrupts enabled after %pF\n", cls->resume);
-
-	/* Call auxillary drivers next. */
-	list_for_each_entry(drv, &cls->drivers, entry) {
-		if (drv->resume)
-			drv->resume(dev);
-		WARN_ONCE(!irqs_disabled(),
-			"Interrupts enabled after %pF\n", drv->resume);
-	}
-}
-
-/**
- *	sysdev_suspend - Suspend all system devices.
- *	@state:		Power state to enter.
- *
- *	We perform an almost identical operation as sysdev_shutdown()
- *	above, though calling ->suspend() instead. Interrupts are disabled
- *	when this called. Devices are responsible for both saving state and
- *	quiescing or powering down the device.
- *
- *	This is only called by the device PM core, so we let them handle
- *	all synchronization.
- */
-int sysdev_suspend(pm_message_t state)
-{
-	struct sysdev_class *cls;
-	struct sys_device *sysdev, *err_dev;
-	struct sysdev_driver *drv, *err_drv;
-	int ret;
-
-	pr_debug("Checking wake-up interrupts\n");
-
-	/* Return error code if there are any wake-up interrupts pending */
-	ret = check_wakeup_irqs();
-	if (ret)
-		return ret;
-
-	WARN_ONCE(!irqs_disabled(),
-		"Interrupts enabled while suspending system devices\n");
-
-	pr_debug("Suspending System Devices\n");
-
-	list_for_each_entry_reverse(cls, &system_kset->list, kset.kobj.entry) {
-		pr_debug("Suspending type '%s':\n",
-			 kobject_name(&cls->kset.kobj));
-
-		list_for_each_entry(sysdev, &cls->kset.list, kobj.entry) {
-			pr_debug(" %s\n", kobject_name(&sysdev->kobj));
-
-			/* Call auxillary drivers first */
-			list_for_each_entry(drv, &cls->drivers, entry) {
-				if (drv->suspend) {
-					ret = drv->suspend(sysdev, state);
-					if (ret)
-						goto aux_driver;
-				}
-				WARN_ONCE(!irqs_disabled(),
-					"Interrupts enabled after %pF\n",
-					drv->suspend);
-			}
-
-			/* Now call the generic one */
-			if (cls->suspend) {
-				ret = cls->suspend(sysdev, state);
-				if (ret)
-					goto cls_driver;
-				WARN_ONCE(!irqs_disabled(),
-					"Interrupts enabled after %pF\n",
-					cls->suspend);
-			}
-		}
-	}
-	return 0;
-	/* resume current sysdev */
-cls_driver:
-	drv = NULL;
-	printk(KERN_ERR "Class suspend failed for %s: %d\n",
-		kobject_name(&sysdev->kobj), ret);
-
-aux_driver:
-	if (drv)
-		printk(KERN_ERR "Class driver suspend failed for %s: %d\n",
-				kobject_name(&sysdev->kobj), ret);
-	list_for_each_entry(err_drv, &cls->drivers, entry) {
-		if (err_drv == drv)
-			break;
-		if (err_drv->resume)
-			err_drv->resume(sysdev);
-	}
-
-	/* resume other sysdevs in current class */
-	list_for_each_entry(err_dev, &cls->kset.list, kobj.entry) {
-		if (err_dev == sysdev)
-			break;
-		pr_debug(" %s\n", kobject_name(&err_dev->kobj));
-		__sysdev_resume(err_dev);
-	}
-
-	/* resume other classes */
-	list_for_each_entry_continue(cls, &system_kset->list, kset.kobj.entry) {
-		list_for_each_entry(err_dev, &cls->kset.list, kobj.entry) {
-			pr_debug(" %s\n", kobject_name(&err_dev->kobj));
-			__sysdev_resume(err_dev);
-		}
-	}
-	return ret;
-}
-EXPORT_SYMBOL_GPL(sysdev_suspend);
-
-/**
- *	sysdev_resume - Bring system devices back to life.
- *
- *	Similar to sysdev_suspend(), but we iterate the list forwards
- *	to guarantee that parent devices are resumed before their children.
- *
- *	Note: Interrupts are disabled when called.
- */
-int sysdev_resume(void)
-{
-	struct sysdev_class *cls;
-
-	WARN_ONCE(!irqs_disabled(),
-		"Interrupts enabled while resuming system devices\n");
-
-	pr_debug("Resuming System Devices\n");
-
-	list_for_each_entry(cls, &system_kset->list, kset.kobj.entry) {
-		struct sys_device *sysdev;
-
-		pr_debug("Resuming type '%s':\n",
-			 kobject_name(&cls->kset.kobj));
-
-		list_for_each_entry(sysdev, &cls->kset.list, kobj.entry) {
-			pr_debug(" %s\n", kobject_name(&sysdev->kobj));
-
-			__sysdev_resume(sysdev);
-		}
-	}
-	return 0;
-}
-EXPORT_SYMBOL_GPL(sysdev_resume);
-
-int __init system_bus_init(void)
-{
-	system_kset = kset_create_and_add("system", NULL, &devices_kset->kobj);
-	if (!system_kset)
-		return -ENOMEM;
-	return 0;
 }
 
 EXPORT_SYMBOL_GPL(sysdev_register);

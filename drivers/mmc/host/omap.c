@@ -2,7 +2,7 @@
  *  linux/drivers/mmc/host/omap.c
  *
  *  Copyright (C) 2004 Nokia Corporation
- *  Written by Tuukka Tikkanen and Juha Yrjölä<juha.yrjola@nokia.com>
+ *  Written by Tuukka Tikkanen and Juha YrjÃ¶lÃ¤<juha.yrjola@nokia.com>
  *  Misc hacks here and there by Tony Lindgren <tony@atomide.com>
  *  Other hacks (DMA, SD, etc) by David Brownell
  *
@@ -33,7 +33,7 @@
 
 #include <plat/board.h>
 #include <plat/mmc.h>
-#include <mach/gpio.h>
+#include <asm/gpio.h>
 #include <plat/dma.h>
 #include <plat/mux.h>
 #include <plat/fpga.h>
@@ -832,7 +832,7 @@ static irqreturn_t mmc_omap_irq(int irq, void *dev_id)
 		return IRQ_HANDLED;
 	}
 
-	if (end_command)
+	if (end_command && host->cmd)
 		mmc_omap_cmd_done(host, host->cmd);
 	if (host->data != NULL) {
 		if (transfer_error)
@@ -1417,7 +1417,7 @@ static int __init mmc_omap_probe(struct platform_device *pdev)
 	if (res == NULL || irq < 0)
 		return -ENXIO;
 
-	res = request_mem_region(res->start, res->end - res->start + 1,
+	res = request_mem_region(res->start, resource_size(res),
 				 pdev->name);
 	if (res == NULL)
 		return -EBUSY;
@@ -1457,7 +1457,7 @@ static int __init mmc_omap_probe(struct platform_device *pdev)
 
 	host->irq = irq;
 	host->phys_base = host->mem_res->start;
-	host->virt_base = ioremap(res->start, res->end - res->start + 1);
+	host->virt_base = ioremap(res->start, resource_size(res));
 	if (!host->virt_base)
 		goto err_ioremap;
 
@@ -1514,7 +1514,7 @@ err_free_mmc_host:
 err_ioremap:
 	kfree(host);
 err_free_mem_region:
-	release_mem_region(res->start, res->end - res->start + 1);
+	release_mem_region(res->start, resource_size(res));
 	return ret;
 }
 
@@ -1634,4 +1634,4 @@ module_exit(mmc_omap_exit);
 MODULE_DESCRIPTION("OMAP Multimedia Card driver");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("platform:" DRIVER_NAME);
-MODULE_AUTHOR("Juha Yrjölä");
+MODULE_AUTHOR("Juha YrjÃ¶lÃ¤");

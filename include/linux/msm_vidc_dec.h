@@ -1,37 +1,3 @@
-/* Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, and the entire permission notice in its entirety,
- *    including the disclaimer of warranties.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote
- *    products derived from this software without specific prior
- *    written permission.
- *
- * ALTERNATIVELY, this product may be distributed under the terms of
- * the GNU General Public License, version 2, in which case the provisions
- * of the GPL version 2 are required INSTEAD OF the BSD license.
- *
- * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED
- * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE, ALL OF
- * WHICH ARE HEREBY DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT
- * OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
- * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
- * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
- * USE OF THIS SOFTWARE, EVEN IF NOT ADVISED OF THE POSSIBILITY OF SUCH
- * DAMAGE.
- *
- */
-
 #ifndef _MSM_VIDC_DEC_H_
 #define _MSM_VIDC_DEC_H_
 
@@ -69,6 +35,7 @@
 #define VDEC_S_ENOTIMPL	(VDEC_S_BASE + 12)
 /* Command is not implemented by the driver.  */
 #define VDEC_S_BUSY	(VDEC_S_BASE + 13)
+#define VDEC_S_INPUT_BITSTREAM_ERR (VDEC_S_BASE + 14)
 
 #define VDEC_INTF_VER	1
 #define VDEC_MSG_BASE	0x0000000
@@ -90,6 +57,7 @@
 #define VDEC_MSG_EVT_CONFIG_CHANGED	(VDEC_MSG_BASE + 13)
 #define VDEC_MSG_EVT_HW_ERROR	(VDEC_MSG_BASE + 14)
 #define VDEC_MSG_EVT_INFO_CONFIG_CHANGED	(VDEC_MSG_BASE + 15)
+#define VDEC_MSG_EVT_INFO_FIELD_DROPPED	(VDEC_MSG_BASE + 16)
 
 /*Buffer flags bits masks.*/
 #define VDEC_BUFFERFLAG_EOS	0x00000001
@@ -107,6 +75,10 @@
 #define VDEC_EXTRADATA_SEI 0x010
 #define VDEC_EXTRADATA_VUI 0x020
 #define VDEC_EXTRADATA_VC1 0x040
+
+#define VDEC_EXTRADATA_EXT_DATA          0x0800
+#define VDEC_EXTRADATA_USER_DATA         0x1000
+#define VDEC_EXTRADATA_EXT_BUFFER        0x2000
 
 #define VDEC_CMDBASE	0x800
 #define VDEC_CMD_SET_INTF_VERSION	(VDEC_CMDBASE)
@@ -230,12 +202,38 @@ struct vdec_ioctl_msg {
 #define VDEC_IOCTL_SET_CONT_ON_RECONFIG  \
 	_IO(VDEC_IOCTL_MAGIC, 34)
 
+#define VDEC_IOCTL_SET_DISABLE_DMX \
+	_IOW(VDEC_IOCTL_MAGIC, 35, struct vdec_ioctl_msg)
+
+#define VDEC_IOCTL_GET_DISABLE_DMX \
+	_IOR(VDEC_IOCTL_MAGIC, 36, struct vdec_ioctl_msg)
+
+#define VDEC_IOCTL_GET_DISABLE_DMX_SUPPORT \
+	_IOR(VDEC_IOCTL_MAGIC, 37, struct vdec_ioctl_msg)
+
+#define VDEC_IOCTL_SET_PERF_CLK \
+	_IOR(VDEC_IOCTL_MAGIC, 38, struct vdec_ioctl_msg)
+
+#define VDEC_IOCTL_SET_META_BUFFERS \
+	_IOW(VDEC_IOCTL_MAGIC, 39, struct vdec_ioctl_msg)
+
+#define VDEC_IOCTL_FREE_META_BUFFERS \
+	_IO(VDEC_IOCTL_MAGIC, 40)
+
+#define VDEC_IOCTL_GET_ENABLE_SEC_METADATA \
+	_IOR(VDEC_IOCTL_MAGIC, 41, struct vdec_ioctl_msg)
+
+/*IOCTL params:GET: InputData - NULL, OutputData - unsigned int.*/
+#define VDEC_IOCTL_GET_PERF_LEVEL \
+	_IOR(VDEC_IOCTL_MAGIC, 42, struct vdec_ioctl_msg)
+
 enum vdec_picture {
 	PICTURE_TYPE_I,
 	PICTURE_TYPE_P,
 	PICTURE_TYPE_B,
 	PICTURE_TYPE_BI,
 	PICTURE_TYPE_SKIP,
+	PICTURE_TYPE_IDR,
 	PICTURE_TYPE_UNKNOWN
 };
 
@@ -252,6 +250,7 @@ struct vdec_allocatorproperty {
 	size_t buffer_size;
 	uint32_t alignment;
 	uint32_t buf_poolid;
+	size_t meta_buffer_size;
 };
 
 struct vdec_bufferpayload {
@@ -525,6 +524,8 @@ struct vdec_input_frameinfo {
 	void *client_data;
 	int pmem_fd;
 	size_t pmem_offset;
+	void __user *desc_addr;
+	uint32_t desc_size;
 };
 
 struct vdec_framesize {
@@ -532,6 +533,17 @@ struct vdec_framesize {
 	uint32_t   top;
 	uint32_t   right;
 	uint32_t   bottom;
+};
+
+struct vdec_aspectratioinfo {
+	uint32_t aspect_ratio;
+	uint32_t par_width;
+	uint32_t par_height;
+};
+
+struct vdec_sep_metadatainfo {
+	void __user *metabufaddr;
+	uint32_t size;
 };
 
 struct vdec_output_frameinfo {
@@ -545,6 +557,10 @@ struct vdec_output_frameinfo {
 	void *input_frame_clientdata;
 	struct vdec_framesize framesize;
 	enum vdec_interlaced_format interlaced_format;
+	struct vdec_aspectratioinfo aspect_ratio_info;
+	struct vdec_sep_metadatainfo metadata_info;
+	size_t metadata_len;
+	size_t metadata_offset;
 };
 
 union vdec_msgdata {
@@ -576,6 +592,14 @@ struct vdec_mv_buff_size{
 	int height;
 	int size;
 	int alignment;
+};
+
+struct vdec_meta_buffers {
+	size_t size;
+	int count;
+	int pmem_fd;
+	int pmem_fd_iommu;
+	int offset;
 };
 
 #endif /* end of macro _VDECDECODER_H_ */

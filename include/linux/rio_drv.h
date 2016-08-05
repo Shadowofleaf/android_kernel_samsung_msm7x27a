@@ -17,7 +17,6 @@
 #include <linux/ioport.h>
 #include <linux/list.h>
 #include <linux/errno.h>
-#include <linux/device.h>
 #include <linux/string.h>
 #include <linux/rio.h>
 
@@ -317,7 +316,8 @@ static inline int rio_add_outb_message(struct rio_mport *mport,
 				       struct rio_dev *rdev, int mbox,
 				       void *buffer, size_t len)
 {
-	return rio_hw_add_outb_message(mport, rdev, mbox, buffer, len);
+	return mport->ops->add_outb_message(mport, rdev, mbox,
+						   buffer, len);
 }
 
 extern int rio_request_inb_mbox(struct rio_mport *, void *, int, int,
@@ -336,7 +336,7 @@ extern int rio_release_inb_mbox(struct rio_mport *, int);
 static inline int rio_add_inb_buffer(struct rio_mport *mport, int mbox,
 				     void *buffer)
 {
-	return rio_hw_add_inb_buffer(mport, mbox, buffer);
+	return mport->ops->add_inb_buffer(mport, mbox, buffer);
 }
 
 /**
@@ -348,7 +348,7 @@ static inline int rio_add_inb_buffer(struct rio_mport *mport, int mbox,
  */
 static inline void *rio_get_inb_message(struct rio_mport *mport, int mbox)
 {
-	return rio_hw_get_inb_message(mport, mbox);
+	return mport->ops->get_inb_message(mport, mbox);
 }
 
 /* Doorbell management */

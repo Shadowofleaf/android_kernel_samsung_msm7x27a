@@ -3,38 +3,16 @@
  *
  * Kernel API
  *
- * Copyright (c) 2009-2010, Code Aurora Forum. All rights
- * reserved.
+ * Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, and the entire permission notice in its entirety,
- *    including the disclaimer of warranties.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote
- *    products derived from this software without specific prior
- *    written permission.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
  *
- * ALTERNATIVELY, this product may be distributed under the terms of
- * the GNU General Public License, version 2, in which case the provisions
- * of the GPL version 2 are required INSTEAD OF the BSD license.
- *
- * THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED
- * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE, ALL OF
- * WHICH ARE HEREBY DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT
- * OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
- * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
- * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
- * USE OF THIS SOFTWARE, EVEN IF NOT ADVISED OF THE POSSIBILITY OF SUCH
- * DAMAGE.
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  *
  */
 #ifndef _TSIF_API_H_
@@ -126,6 +104,13 @@ enum tsif_state {
 };
 
 /**
+ * tsif_get_active - return active tsif hardware instance
+ *
+ * Return     TSIF instance to use (selected by CONFIG_MSM_USE_TSIF1)
+ */
+int tsif_get_active(void);
+
+/**
  * tsif_attach - Attach to the device.
  * @id:       TSIF device ID, used to identify TSIF instance.
  * @notify:   client callback, called when
@@ -138,11 +123,13 @@ enum tsif_state {
  * Should be called prior to any other tsif_XXX function.
  */
 void *tsif_attach(int id, void (*notify)(void *client_data), void *client_data);
+
 /**
  * tsif_detach - detach from device
  * @cookie:    TSIF cookie previously obtained with tsif_attach()
  */
 void tsif_detach(void *cookie);
+
 /**
  * tsif_get_info - get data buffer info
  * @cookie:    TSIF cookie previously obtained with tsif_attach()
@@ -154,6 +141,7 @@ void tsif_detach(void *cookie);
  * using data; since data buffer will be re-allocated on tsif_start()
  */
 void tsif_get_info(void *cookie, void **pdata, int *psize);
+
 /**
  * tsif_set_mode - set TSIF mode
  * @cookie:    TSIF cookie previously obtained with tsif_attach()
@@ -164,6 +152,7 @@ void tsif_get_info(void *cookie, void **pdata, int *psize);
  * Mode may be changed only when TSIF device is stopped.
  */
 int tsif_set_mode(void *cookie, int mode);
+
 /**
  * tsif_set_time_limit - set TSIF time limit
  * @cookie:    TSIF cookie previously obtained with tsif_attach()
@@ -174,6 +163,7 @@ int tsif_set_mode(void *cookie, int mode);
  * Time limit may be changed only when TSIF device is stopped.
  */
 int tsif_set_time_limit(void *cookie, u32 value);
+
 /**
  * tsif_set_buf_config - configure data buffer
  *
@@ -194,6 +184,7 @@ int tsif_set_time_limit(void *cookie, u32 value);
  *   stats
  */
 int tsif_set_buf_config(void *cookie, u32 pkts_in_chunk, u32 chunks_in_buf);
+
 /**
  * tsif_get_state - query current data buffer information
  * @cookie:    TSIF cookie previously obtained with tsif_attach()
@@ -202,6 +193,51 @@ int tsif_set_buf_config(void *cookie, u32 pkts_in_chunk, u32 chunks_in_buf);
  * @state:     if not NULL, state will be stored here
  */
 void tsif_get_state(void *cookie, int *ri, int *wi, enum tsif_state *state);
+
+/**
+ * tsif_set_clk_inverse - set whether to inverse the clock signal.
+ * @cookie:   TSIF cookie previously obtained with tsif_attach()
+ * @inverse:  1 to inverse the clock, 0 otherwise. Default is 0.
+ *
+ * Return      error code
+ *
+ * Setting may be changed only when TSIF device is stopped.
+ */
+int tsif_set_clk_inverse(void *cookie, int inverse);
+
+/**
+ * tsif_set_data_inverse - set whether to inverse the data signal.
+ * @cookie:   TSIF cookie previously obtained with tsif_attach()
+ * @inverse:  1 to inverse the clock, 0 otherwise. Default is 0.
+ *
+ * Return      error code
+ *
+ * Setting may be changed only when TSIF device is stopped.
+ */
+int tsif_set_data_inverse(void *cookie, int inverse);
+
+/**
+ * tsif_set_sync_inverse - set whether to inverse the sync signal.
+ * @cookie:   TSIF cookie previously obtained with tsif_attach()
+ * @inverse:  1 to inverse the clock, 0 otherwise. Default is 0.
+ *
+ * Return      error code
+ *
+ * Setting may be changed only when TSIF device is stopped.
+ */
+int tsif_set_sync_inverse(void *cookie, int inverse);
+
+/**
+ * tsif_set_enable_inverse - set whether to inverse the enable signal.
+ * @cookie:   TSIF cookie previously obtained with tsif_attach()
+ * @inverse:  1 to inverse the clock, 0 otherwise. Default is 0.
+ *
+ * Return      error code
+ *
+ * Setting may be changed only when TSIF device is stopped.
+ */
+int tsif_set_enable_inverse(void *cookie, int inverse);
+
 /**
  * tsif_start - start data acquisition
  * @cookie:    TSIF cookie previously obtained with tsif_attach()
@@ -209,6 +245,7 @@ void tsif_get_state(void *cookie, int *ri, int *wi, enum tsif_state *state);
  * Return      error code
  */
 int tsif_start(void *cookie);
+
 /**
  * tsif_stop - stop data acquisition
  * @cookie:    TSIF cookie previously obtained with tsif_attach()
@@ -217,6 +254,18 @@ int tsif_start(void *cookie);
  * query data buffer info using tsif_get_info() and reset its data pointers.
  */
 void tsif_stop(void *cookie);
+
+/**
+ * tsif_get_ref_clk_counter - return the TSIF clock reference (TCR) counter.
+ * @cookie:      TSIF cookie previously obtained with tsif_attach()
+ * @tcr_counter: the value of TCR counter
+ *
+ * Return      error code
+ *
+ * TCR increments at a rate equal to 27 MHz/256 = 105.47 kHz.
+ */
+int tsif_get_ref_clk_counter(void *cookie, u32 *tcr_counter);
+
 /**
  * tsif_reclaim_packets - inform that buffer space may be reclaimed
  * @cookie:    TSIF cookie previously obtained with tsif_attach()

@@ -1,7 +1,7 @@
 /*
  * leds-msm-pmic.c - MSM PMIC LEDs driver.
  *
- * Copyright (c) 2009, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2009, The Linux Foundation. All rights reserved.
  * Copyright (C) 2011, Michael Richter (alias neldar)
  * Copyright (C) 2011, Ketut P. Kumajaya
  * Copyright (C) 2011, Kolja Dummann <k.dummann@gmail.com>
@@ -20,6 +20,7 @@
 #include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/leds.h>
+#include <linux/module.h>
 
 #include <mach/pmic.h>
 #include <linux/gpio.h>
@@ -48,6 +49,7 @@ static void msm_keypad_bl_led_set(struct led_classdev *led_cdev,
 
 	printk("[KeyLED] %s: gpio124_value=%d\n", __func__, gpio_get_value(n_GPIO_KEY_LED_EN));
 }
+
 static struct led_classdev msm_kp_bl_led = {
 	.name			= "button-backlight",			//"keyboard-backlight",
 	.brightness_set		= msm_keypad_bl_led_set,

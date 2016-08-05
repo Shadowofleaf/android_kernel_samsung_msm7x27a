@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2010-2011, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -15,8 +15,10 @@
  * RPCROUTER SMD XPRT module.
  */
 
+#include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/types.h>
+#include <linux/export.h>
 
 #include <mach/msm_smd.h>
 #include "smd_rpcrouter.h"
@@ -56,7 +58,6 @@ static int rpcrouter_smd_remote_write(void *data, uint32_t len, uint32_t type)
 static int rpcrouter_smd_remote_close(void)
 {
 	smsm_change_state(SMSM_APPS_STATE, SMSM_RPCINIT, 0);
-	pr_info("%s\n", __func__);
 	return smd_close(smd_remote_xprt.channel);
 }
 

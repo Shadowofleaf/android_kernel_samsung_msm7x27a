@@ -1,39 +1,43 @@
-/* Copyright (c) 2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2013 The Linux Foundation. All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- *       copyright notice, this list of conditions and the following
- *       disclaimer in the documentation and/or other materials provided
- *       with the distribution.
- *     * Neither the name of Code Aurora Forum, Inc. nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
  *
- * THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
- * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
- * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
- * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
- * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  *
  */
 
 #ifndef __ASM_ARCH_MSM_SERIAL_HS_LITE_H
 #define __ASM_ARCH_MSM_SERIAL_HS_LITE_H
-
+/**
+ * struct msm_serial_hslite_platform_data - platform device data
+ *              for msm_hs_lite.
+ * @config_gpio: Select GPIOs to configure.
+ *		Set 4 if 4-wire UART used (for Tx, Rx, CTS, RFR GPIOs).
+ *		Set 1 if 2-wire UART used (for Tx, Rx GPIOs).
+ * @uart_tx_gpio: GPIO number for UART Tx Line.
+ * @uart_rx_gpio: GPIO number for UART Rx Line.
+ * @uart_cts_gpio: GPIO number for UART CTS Line.
+ * @uart_rfr_gpio: GPIO number for UART RFR Line.
+ * @set_uart_clk_zero: use this if setting UART Clock to zero is required
+ * It is mainly required where same UART is used across different processor.
+ * Make sure that Clock driver for platform support setting clock rate to zero.
+ * @use_pm: use this to enable power management
+ * @line: Used to set UART Port number.
+ */
 struct msm_serial_hslite_platform_data {
 	unsigned config_gpio;
 	unsigned uart_tx_gpio;
 	unsigned uart_rx_gpio;
+	unsigned uart_cts_gpio;
+	unsigned uart_rfr_gpio;
+	bool set_uart_clk_zero;
+	bool use_pm;
+	int line;
 };
 
 #endif

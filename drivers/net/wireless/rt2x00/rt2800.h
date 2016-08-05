@@ -50,7 +50,9 @@
  * RF2853 2.4G/5G 3T3R
  * RF3320 2.4G 1T1R(RT3350/RT3370/RT3390)
  * RF3322 2.4G 2T2R(RT3352/RT3371/RT3372/RT3391/RT3392)
- * RF3853 2.4G/5G 3T3R(RT3883/RT3563/RT3573/RT3593/RT3662)
+ * RF3053 2.4G/5G 3T3R(RT3883/RT3563/RT3573/RT3593/RT3662)
+ * RF5370 2.4G 1T1R
+ * RF5390 2.4G 1T1R
  */
 #define RF2820				0x0001
 #define RF2850				0x0002
@@ -64,7 +66,10 @@
 #define RF2853				0x000a
 #define RF3320				0x000b
 #define RF3322				0x000c
-#define RF3853				0x000d
+#define RF3053				0x000d
+#define RF5370				0x5370
+#define RF5372				0x5372
+#define RF5390				0x5390
 
 /*
  * Chipset revisions.
@@ -77,6 +82,7 @@
 #define REV_RT3071E			0x0211
 #define REV_RT3090E			0x0211
 #define REV_RT3390E			0x0211
+#define REV_RT5390F			0x0502
 
 /*
  * Signal information.
@@ -119,6 +125,13 @@
 #define E2PROM_CSR_TYPE			FIELD32(0x00000030)
 #define E2PROM_CSR_LOAD_STATUS		FIELD32(0x00000040)
 #define E2PROM_CSR_RELOAD		FIELD32(0x00000080)
+
+/*
+ * AUX_CTRL: Aux/PCI-E related configuration
+ */
+#define AUX_CTRL			0x10c
+#define AUX_CTRL_WAKE_PCIE_EN		FIELD32(0x00000002)
+#define AUX_CTRL_FORCE_PCIE_CLK		FIELD32(0x00000400)
 
 /*
  * OPT_14: Unknown register used by rt3xxx devices.
@@ -270,6 +283,7 @@
 
 /*
  * GPIO_CTRL_CFG:
+ * GPIOD: GPIO direction, 0: Output, 1: Input
  */
 #define GPIO_CTRL_CFG			0x0228
 #define GPIO_CTRL_CFG_BIT0		FIELD32(0x00000001)
@@ -280,7 +294,14 @@
 #define GPIO_CTRL_CFG_BIT5		FIELD32(0x00000020)
 #define GPIO_CTRL_CFG_BIT6		FIELD32(0x00000040)
 #define GPIO_CTRL_CFG_BIT7		FIELD32(0x00000080)
-#define GPIO_CTRL_CFG_BIT8		FIELD32(0x00000100)
+#define GPIO_CTRL_CFG_GPIOD_BIT0	FIELD32(0x00000100)
+#define GPIO_CTRL_CFG_GPIOD_BIT1	FIELD32(0x00000200)
+#define GPIO_CTRL_CFG_GPIOD_BIT2	FIELD32(0x00000400)
+#define GPIO_CTRL_CFG_GPIOD_BIT3	FIELD32(0x00000800)
+#define GPIO_CTRL_CFG_GPIOD_BIT4	FIELD32(0x00001000)
+#define GPIO_CTRL_CFG_GPIOD_BIT5	FIELD32(0x00002000)
+#define GPIO_CTRL_CFG_GPIOD_BIT6	FIELD32(0x00004000)
+#define GPIO_CTRL_CFG_GPIOD_BIT7	FIELD32(0x00008000)
 
 /*
  * MCU_CMD_CFG
@@ -372,8 +393,12 @@
 
 /*
  * US_CYC_CNT
+ * BT_MODE_EN: Bluetooth mode enable
+ * CLOCK CYCLE: Clock cycle count in 1us.
+ * PCI:0x21, PCIE:0x7d, USB:0x1e
  */
 #define US_CYC_CNT			0x02a4
+#define US_CYC_CNT_BT_MODE_EN		FIELD32(0x00000100)
 #define US_CYC_CNT_CLOCK_CYCLE		FIELD32(0x000000ff)
 
 /*
@@ -442,7 +467,7 @@
  */
 #define	RF_CSR_CFG			0x0500
 #define RF_CSR_CFG_DATA			FIELD32(0x000000ff)
-#define RF_CSR_CFG_REGNUM		FIELD32(0x00001f00)
+#define RF_CSR_CFG_REGNUM		FIELD32(0x00003f00)
 #define RF_CSR_CFG_WRITE		FIELD32(0x00010000)
 #define RF_CSR_CFG_BUSY			FIELD32(0x00020000)
 
@@ -594,7 +619,7 @@
  * READ_CONTROL: 0 write BBP, 1 read BBP
  * BUSY: ASIC is busy executing BBP commands
  * BBP_PAR_DUR: 0 4 MAC clocks, 1 8 MAC clocks
- * BBP_RW_MODE: 0 serial, 1 paralell
+ * BBP_RW_MODE: 0 serial, 1 parallel
  */
 #define BBP_CSR_CFG			0x101c
 #define BBP_CSR_CFG_VALUE		FIELD32(0x000000ff)
@@ -640,6 +665,9 @@
 
 /*
  * LED_CFG: LED control
+ * ON_PERIOD: LED active time (ms) during TX (only used for LED mode 1)
+ * OFF_PERIOD: LED inactive time (ms) during TX (only used for LED mode 1)
+ * SLOW_BLINK_PERIOD: LED blink interval in seconds (only used for LED mode 2)
  * color LED's:
  *   0: off
  *   1: blinking upon TX2
@@ -938,6 +966,7 @@
  * TX_PIN_CFG:
  */
 #define TX_PIN_CFG			0x1328
+#define TX_PIN_CFG_PA_PE_DISABLE	0xfcfffff0
 #define TX_PIN_CFG_PA_PE_A0_EN		FIELD32(0x00000001)
 #define TX_PIN_CFG_PA_PE_G0_EN		FIELD32(0x00000002)
 #define TX_PIN_CFG_PA_PE_A1_EN		FIELD32(0x00000004)
@@ -958,6 +987,14 @@
 #define TX_PIN_CFG_RFTR_POL		FIELD32(0x00020000)
 #define TX_PIN_CFG_TRSW_EN		FIELD32(0x00040000)
 #define TX_PIN_CFG_TRSW_POL		FIELD32(0x00080000)
+#define TX_PIN_CFG_PA_PE_A2_EN		FIELD32(0x01000000)
+#define TX_PIN_CFG_PA_PE_G2_EN		FIELD32(0x02000000)
+#define TX_PIN_CFG_PA_PE_A2_POL		FIELD32(0x04000000)
+#define TX_PIN_CFG_PA_PE_G2_POL		FIELD32(0x08000000)
+#define TX_PIN_CFG_LNA_PE_A2_EN		FIELD32(0x10000000)
+#define TX_PIN_CFG_LNA_PE_G2_EN		FIELD32(0x20000000)
+#define TX_PIN_CFG_LNA_PE_A2_POL	FIELD32(0x40000000)
+#define TX_PIN_CFG_LNA_PE_G2_POL	FIELD32(0x80000000)
 
 /*
  * TX_BAND_CFG: 0x1 use upper 20MHz, 0x0 use lower 20MHz
@@ -1132,8 +1169,8 @@
  * PROTECT_RATE: Protection control frame rate for CCK TX(RTS/CTS/CFEnd)
  * PROTECT_CTRL: Protection control frame type for CCK TX
  *               0:none, 1:RTS/CTS, 2:CTS-to-self
- * PROTECT_NAV: TXOP protection type for CCK TX
- *              0:none, 1:ShortNAVprotect, 2:LongNAVProtect
+ * PROTECT_NAV_SHORT: TXOP protection type for CCK TX with short NAV
+ * PROTECT_NAV_LONG: TXOP protection type for CCK TX with long NAV
  * TX_OP_ALLOW_CCK: CCK TXOP allowance, 0:disallow
  * TX_OP_ALLOW_OFDM: CCK TXOP allowance, 0:disallow
  * TX_OP_ALLOW_MM20: CCK TXOP allowance, 0:disallow
@@ -1145,7 +1182,8 @@
 #define CCK_PROT_CFG			0x1364
 #define CCK_PROT_CFG_PROTECT_RATE	FIELD32(0x0000ffff)
 #define CCK_PROT_CFG_PROTECT_CTRL	FIELD32(0x00030000)
-#define CCK_PROT_CFG_PROTECT_NAV	FIELD32(0x000c0000)
+#define CCK_PROT_CFG_PROTECT_NAV_SHORT	FIELD32(0x00040000)
+#define CCK_PROT_CFG_PROTECT_NAV_LONG	FIELD32(0x00080000)
 #define CCK_PROT_CFG_TX_OP_ALLOW_CCK	FIELD32(0x00100000)
 #define CCK_PROT_CFG_TX_OP_ALLOW_OFDM	FIELD32(0x00200000)
 #define CCK_PROT_CFG_TX_OP_ALLOW_MM20	FIELD32(0x00400000)
@@ -1160,7 +1198,8 @@
 #define OFDM_PROT_CFG			0x1368
 #define OFDM_PROT_CFG_PROTECT_RATE	FIELD32(0x0000ffff)
 #define OFDM_PROT_CFG_PROTECT_CTRL	FIELD32(0x00030000)
-#define OFDM_PROT_CFG_PROTECT_NAV	FIELD32(0x000c0000)
+#define OFDM_PROT_CFG_PROTECT_NAV_SHORT	FIELD32(0x00040000)
+#define OFDM_PROT_CFG_PROTECT_NAV_LONG	FIELD32(0x00080000)
 #define OFDM_PROT_CFG_TX_OP_ALLOW_CCK	FIELD32(0x00100000)
 #define OFDM_PROT_CFG_TX_OP_ALLOW_OFDM	FIELD32(0x00200000)
 #define OFDM_PROT_CFG_TX_OP_ALLOW_MM20	FIELD32(0x00400000)
@@ -1175,7 +1214,8 @@
 #define MM20_PROT_CFG			0x136c
 #define MM20_PROT_CFG_PROTECT_RATE	FIELD32(0x0000ffff)
 #define MM20_PROT_CFG_PROTECT_CTRL	FIELD32(0x00030000)
-#define MM20_PROT_CFG_PROTECT_NAV	FIELD32(0x000c0000)
+#define MM20_PROT_CFG_PROTECT_NAV_SHORT	FIELD32(0x00040000)
+#define MM20_PROT_CFG_PROTECT_NAV_LONG	FIELD32(0x00080000)
 #define MM20_PROT_CFG_TX_OP_ALLOW_CCK	FIELD32(0x00100000)
 #define MM20_PROT_CFG_TX_OP_ALLOW_OFDM	FIELD32(0x00200000)
 #define MM20_PROT_CFG_TX_OP_ALLOW_MM20	FIELD32(0x00400000)
@@ -1190,7 +1230,8 @@
 #define MM40_PROT_CFG			0x1370
 #define MM40_PROT_CFG_PROTECT_RATE	FIELD32(0x0000ffff)
 #define MM40_PROT_CFG_PROTECT_CTRL	FIELD32(0x00030000)
-#define MM40_PROT_CFG_PROTECT_NAV	FIELD32(0x000c0000)
+#define MM40_PROT_CFG_PROTECT_NAV_SHORT	FIELD32(0x00040000)
+#define MM40_PROT_CFG_PROTECT_NAV_LONG	FIELD32(0x00080000)
 #define MM40_PROT_CFG_TX_OP_ALLOW_CCK	FIELD32(0x00100000)
 #define MM40_PROT_CFG_TX_OP_ALLOW_OFDM	FIELD32(0x00200000)
 #define MM40_PROT_CFG_TX_OP_ALLOW_MM20	FIELD32(0x00400000)
@@ -1205,7 +1246,8 @@
 #define GF20_PROT_CFG			0x1374
 #define GF20_PROT_CFG_PROTECT_RATE	FIELD32(0x0000ffff)
 #define GF20_PROT_CFG_PROTECT_CTRL	FIELD32(0x00030000)
-#define GF20_PROT_CFG_PROTECT_NAV	FIELD32(0x000c0000)
+#define GF20_PROT_CFG_PROTECT_NAV_SHORT	FIELD32(0x00040000)
+#define GF20_PROT_CFG_PROTECT_NAV_LONG	FIELD32(0x00080000)
 #define GF20_PROT_CFG_TX_OP_ALLOW_CCK	FIELD32(0x00100000)
 #define GF20_PROT_CFG_TX_OP_ALLOW_OFDM	FIELD32(0x00200000)
 #define GF20_PROT_CFG_TX_OP_ALLOW_MM20	FIELD32(0x00400000)
@@ -1220,7 +1262,8 @@
 #define GF40_PROT_CFG			0x1378
 #define GF40_PROT_CFG_PROTECT_RATE	FIELD32(0x0000ffff)
 #define GF40_PROT_CFG_PROTECT_CTRL	FIELD32(0x00030000)
-#define GF40_PROT_CFG_PROTECT_NAV	FIELD32(0x000c0000)
+#define GF40_PROT_CFG_PROTECT_NAV_SHORT	FIELD32(0x00040000)
+#define GF40_PROT_CFG_PROTECT_NAV_LONG	FIELD32(0x00080000)
 #define GF40_PROT_CFG_TX_OP_ALLOW_CCK	FIELD32(0x00100000)
 #define GF40_PROT_CFG_TX_OP_ALLOW_OFDM	FIELD32(0x00200000)
 #define GF40_PROT_CFG_TX_OP_ALLOW_MM20	FIELD32(0x00400000)
@@ -1594,6 +1637,7 @@ struct mac_iveiv_entry {
 
 /*
  * H2M_MAILBOX_CSR: Host-to-MCU Mailbox.
+ * CMD_TOKEN: Command id, 0xff disable status reporting.
  */
 #define H2M_MAILBOX_CSR			0x7010
 #define H2M_MAILBOX_CSR_ARG0		FIELD32(0x000000ff)
@@ -1603,6 +1647,8 @@ struct mac_iveiv_entry {
 
 /*
  * H2M_MAILBOX_CID:
+ * Free slots contain 0xff. MCU will store command's token to lowest free slot.
+ * If all slots are occupied status will be dropped.
  */
 #define H2M_MAILBOX_CID			0x7014
 #define H2M_MAILBOX_CID_CMD0		FIELD32(0x000000ff)
@@ -1612,6 +1658,7 @@ struct mac_iveiv_entry {
 
 /*
  * H2M_MAILBOX_STATUS:
+ * Command status will be saved to same slot as command id.
  */
 #define H2M_MAILBOX_STATUS		0x701c
 
@@ -1697,16 +1744,20 @@ struct mac_iveiv_entry {
  */
 
 /*
- * BBP 1: TX Antenna & Power
- * POWER: 0 - normal, 1 - drop tx power by 6dBm, 2 - drop tx power by 12dBm,
- *	3 - increase tx power by 6dBm
+ * BBP 1: TX Antenna & Power Control
+ * POWER_CTRL:
+ * 0 - normal,
+ * 1 - drop tx power by 6dBm,
+ * 2 - drop tx power by 12dBm,
+ * 3 - increase tx power by 6dBm
  */
-#define BBP1_TX_POWER			FIELD8(0x07)
+#define BBP1_TX_POWER_CTRL		FIELD8(0x07)
 #define BBP1_TX_ANTENNA			FIELD8(0x18)
 
 /*
  * BBP 3: RX Antenna
  */
+#define BBP3_RX_ADC				FIELD8(0x03)
 #define BBP3_RX_ANTENNA			FIELD8(0x18)
 #define BBP3_HT40_MINUS			FIELD8(0x20)
 
@@ -1715,6 +1766,13 @@ struct mac_iveiv_entry {
  */
 #define BBP4_TX_BF			FIELD8(0x01)
 #define BBP4_BANDWIDTH			FIELD8(0x18)
+#define BBP4_MAC_IF_CTRL		FIELD8(0x40)
+
+/*
+ * BBP 109
+ */
+#define BBP109_TX0_POWER		FIELD8(0x0f)
+#define BBP109_TX1_POWER		FIELD8(0xf0)
 
 /*
  * BBP 138: Unknown
@@ -1725,6 +1783,11 @@ struct mac_iveiv_entry {
 #define BBP138_TX_DAC2			FIELD8(0x40)
 
 /*
+ * BBP 152: Rx Ant
+ */
+#define BBP152_RX_DEFAULT_ANT		FIELD8(0x80)
+
+/*
  * RFCSR registers
  * The wordsize of the RFCSR is 8 bits.
  */
@@ -1733,31 +1796,66 @@ struct mac_iveiv_entry {
  * RFCSR 1:
  */
 #define RFCSR1_RF_BLOCK_EN		FIELD8(0x01)
+#define RFCSR1_PLL_PD			FIELD8(0x02)
 #define RFCSR1_RX0_PD			FIELD8(0x04)
 #define RFCSR1_TX0_PD			FIELD8(0x08)
 #define RFCSR1_RX1_PD			FIELD8(0x10)
 #define RFCSR1_TX1_PD			FIELD8(0x20)
+#define RFCSR1_RX2_PD			FIELD8(0x40)
+#define RFCSR1_TX2_PD			FIELD8(0x80)
+
+/*
+ * RFCSR 2:
+ */
+#define RFCSR2_RESCAL_EN		FIELD8(0x80)
+
+/*
+ * RFCSR 3:
+ */
+#define RFCSR3_K			FIELD8(0x0f)
+/* Bits [7-4] for RF3320 (RT3370/RT3390), on other chipsets reserved */
+#define RFCSR3_PA1_BIAS_CCK		FIELD8(0x70);
+#define RFCSR3_PA2_CASCODE_BIAS_CCKK	FIELD8(0x80);
+
+/*
+ * FRCSR 5:
+ */
+#define RFCSR5_R1			FIELD8(0x0c)
 
 /*
  * RFCSR 6:
  */
 #define RFCSR6_R1			FIELD8(0x03)
 #define RFCSR6_R2			FIELD8(0x40)
+#define RFCSR6_TXDIV		FIELD8(0x0c)
 
 /*
  * RFCSR 7:
  */
 #define RFCSR7_RF_TUNING		FIELD8(0x01)
+#define RFCSR7_BIT1			FIELD8(0x02)
+#define RFCSR7_BIT2			FIELD8(0x04)
+#define RFCSR7_BIT3			FIELD8(0x08)
+#define RFCSR7_BIT4			FIELD8(0x10)
+#define RFCSR7_BIT5			FIELD8(0x20)
+#define RFCSR7_BITS67			FIELD8(0xc0)
+
+/*
+ * RFCSR 11:
+ */
+#define RFCSR11_R			FIELD8(0x03)
 
 /*
  * RFCSR 12:
  */
 #define RFCSR12_TX_POWER		FIELD8(0x1f)
+#define RFCSR12_DR0				FIELD8(0xe0)
 
 /*
  * RFCSR 13:
  */
 #define RFCSR13_TX_POWER		FIELD8(0x1f)
+#define RFCSR13_DR0				FIELD8(0xe0)
 
 /*
  * RFCSR 15:
@@ -1765,11 +1863,17 @@ struct mac_iveiv_entry {
 #define RFCSR15_TX_LO2_EN		FIELD8(0x08)
 
 /*
+ * RFCSR 16:
+ */
+#define RFCSR16_TXMIXER_GAIN		FIELD8(0x07)
+
+/*
  * RFCSR 17:
  */
 #define RFCSR17_TXMIXER_GAIN		FIELD8(0x07)
 #define RFCSR17_TX_LO1_EN		FIELD8(0x08)
 #define RFCSR17_R			FIELD8(0x20)
+#define RFCSR17_CODE                   FIELD8(0x7f)
 
 /*
  * RFCSR 20:
@@ -1792,6 +1896,13 @@ struct mac_iveiv_entry {
 #define RFCSR23_FREQ_OFFSET		FIELD8(0x7f)
 
 /*
+ * RFCSR 24:
+ */
+#define RFCSR24_TX_AGC_FC		FIELD8(0x1f)
+#define RFCSR24_TX_H20M			FIELD8(0x20)
+#define RFCSR24_TX_CALIB		FIELD8(0x7f)
+
+/*
  * RFCSR 27:
  */
 #define RFCSR27_R1			FIELD8(0x03)
@@ -1802,7 +1913,32 @@ struct mac_iveiv_entry {
 /*
  * RFCSR 30:
  */
+#define RFCSR30_TX_H20M			FIELD8(0x02)
+#define RFCSR30_RX_H20M			FIELD8(0x04)
+#define RFCSR30_RX_VCM			FIELD8(0x18)
 #define RFCSR30_RF_CALIBRATION		FIELD8(0x80)
+
+/*
+ * RFCSR 31:
+ */
+#define RFCSR31_RX_AGC_FC		FIELD8(0x1f)
+#define RFCSR31_RX_H20M			FIELD8(0x20)
+#define RFCSR31_RX_CALIB		FIELD8(0x7f)
+
+/*
+ * RFCSR 38:
+ */
+#define RFCSR38_RX_LO1_EN		FIELD8(0x20)
+
+/*
+ * RFCSR 39:
+ */
+#define RFCSR39_RX_LO2_EN		FIELD8(0x80)
+
+/*
+ * RFCSR 49:
+ */
+#define RFCSR49_TX			FIELD8(0x3f)
 
 /*
  * RF registers
@@ -1835,6 +1971,11 @@ struct mac_iveiv_entry {
  * EEPROM content.
  * The wordsize of the EEPROM is 16 bits.
  */
+
+/*
+ * Chip ID
+ */
+#define EEPROM_CHIP_ID			0x0000
 
 /*
  * EEPROM Version
@@ -1989,23 +2130,32 @@ struct mac_iveiv_entry {
 #define EEPROM_RSSI_A2_LNA_A2		FIELD16(0xff00)
 
 /*
- * EEPROM Maximum TX power values
+ * EEPROM TXMIXER GAIN A offset (note overlaps with EEPROM RSSI A2).
  */
-#define EEPROM_MAX_TX_POWER		0x0027
-#define EEPROM_MAX_TX_POWER_24GHZ	FIELD16(0x00ff)
-#define EEPROM_MAX_TX_POWER_5GHZ	FIELD16(0xff00)
+#define EEPROM_TXMIXER_GAIN_A		0x0026
+#define EEPROM_TXMIXER_GAIN_A_VAL	FIELD16(0x0007)
+
+/*
+ * EEPROM EIRP Maximum TX power values(unit: dbm)
+ */
+#define EEPROM_EIRP_MAX_TX_POWER	0x0027
+#define EEPROM_EIRP_MAX_TX_POWER_2GHZ	FIELD16(0x00ff)
+#define EEPROM_EIRP_MAX_TX_POWER_5GHZ	FIELD16(0xff00)
 
 /*
  * EEPROM TXpower delta: 20MHZ AND 40 MHZ use different power.
  * This is delta in 40MHZ.
- * VALUE: Tx Power dalta value (MAX=4)
+ * VALUE: Tx Power dalta value, MAX=4(unit: dbm)
  * TYPE: 1: Plus the delta value, 0: minus the delta value
- * TXPOWER: Enable:
+ * ENABLE: enable tx power compensation for 40BW
  */
 #define EEPROM_TXPOWER_DELTA		0x0028
-#define EEPROM_TXPOWER_DELTA_VALUE	FIELD16(0x003f)
-#define EEPROM_TXPOWER_DELTA_TYPE	FIELD16(0x0040)
-#define EEPROM_TXPOWER_DELTA_TXPOWER	FIELD16(0x0080)
+#define EEPROM_TXPOWER_DELTA_VALUE_2G	FIELD16(0x003f)
+#define EEPROM_TXPOWER_DELTA_TYPE_2G	FIELD16(0x0040)
+#define EEPROM_TXPOWER_DELTA_ENABLE_2G	FIELD16(0x0080)
+#define EEPROM_TXPOWER_DELTA_VALUE_5G	FIELD16(0x3f00)
+#define EEPROM_TXPOWER_DELTA_TYPE_5G	FIELD16(0x4000)
+#define EEPROM_TXPOWER_DELTA_ENABLE_5G	FIELD16(0x8000)
 
 /*
  * EEPROM TXPOWER 802.11BG
@@ -2017,6 +2167,59 @@ struct mac_iveiv_entry {
 #define EEPROM_TXPOWER_BG_2		FIELD16(0xff00)
 
 /*
+ * EEPROM temperature compensation boundaries 802.11BG
+ * MINUS4: If the actual TSSI is below this boundary, tx power needs to be
+ *         reduced by (agc_step * -4)
+ * MINUS3: If the actual TSSI is below this boundary, tx power needs to be
+ *         reduced by (agc_step * -3)
+ */
+#define EEPROM_TSSI_BOUND_BG1		0x0037
+#define EEPROM_TSSI_BOUND_BG1_MINUS4	FIELD16(0x00ff)
+#define EEPROM_TSSI_BOUND_BG1_MINUS3	FIELD16(0xff00)
+
+/*
+ * EEPROM temperature compensation boundaries 802.11BG
+ * MINUS2: If the actual TSSI is below this boundary, tx power needs to be
+ *         reduced by (agc_step * -2)
+ * MINUS1: If the actual TSSI is below this boundary, tx power needs to be
+ *         reduced by (agc_step * -1)
+ */
+#define EEPROM_TSSI_BOUND_BG2		0x0038
+#define EEPROM_TSSI_BOUND_BG2_MINUS2	FIELD16(0x00ff)
+#define EEPROM_TSSI_BOUND_BG2_MINUS1	FIELD16(0xff00)
+
+/*
+ * EEPROM temperature compensation boundaries 802.11BG
+ * REF: Reference TSSI value, no tx power changes needed
+ * PLUS1: If the actual TSSI is above this boundary, tx power needs to be
+ *        increased by (agc_step * 1)
+ */
+#define EEPROM_TSSI_BOUND_BG3		0x0039
+#define EEPROM_TSSI_BOUND_BG3_REF	FIELD16(0x00ff)
+#define EEPROM_TSSI_BOUND_BG3_PLUS1	FIELD16(0xff00)
+
+/*
+ * EEPROM temperature compensation boundaries 802.11BG
+ * PLUS2: If the actual TSSI is above this boundary, tx power needs to be
+ *        increased by (agc_step * 2)
+ * PLUS3: If the actual TSSI is above this boundary, tx power needs to be
+ *        increased by (agc_step * 3)
+ */
+#define EEPROM_TSSI_BOUND_BG4		0x003a
+#define EEPROM_TSSI_BOUND_BG4_PLUS2	FIELD16(0x00ff)
+#define EEPROM_TSSI_BOUND_BG4_PLUS3	FIELD16(0xff00)
+
+/*
+ * EEPROM temperature compensation boundaries 802.11BG
+ * PLUS4: If the actual TSSI is above this boundary, tx power needs to be
+ *        increased by (agc_step * 4)
+ * AGC_STEP: Temperature compensation step.
+ */
+#define EEPROM_TSSI_BOUND_BG5		0x003b
+#define EEPROM_TSSI_BOUND_BG5_PLUS4	FIELD16(0x00ff)
+#define EEPROM_TSSI_BOUND_BG5_AGC_STEP	FIELD16(0xff00)
+
+/*
  * EEPROM TXPOWER 802.11A
  */
 #define EEPROM_TXPOWER_A1		0x003c
@@ -2024,6 +2227,59 @@ struct mac_iveiv_entry {
 #define EEPROM_TXPOWER_A_SIZE		6
 #define EEPROM_TXPOWER_A_1		FIELD16(0x00ff)
 #define EEPROM_TXPOWER_A_2		FIELD16(0xff00)
+
+/*
+ * EEPROM temperature compensation boundaries 802.11A
+ * MINUS4: If the actual TSSI is below this boundary, tx power needs to be
+ *         reduced by (agc_step * -4)
+ * MINUS3: If the actual TSSI is below this boundary, tx power needs to be
+ *         reduced by (agc_step * -3)
+ */
+#define EEPROM_TSSI_BOUND_A1		0x006a
+#define EEPROM_TSSI_BOUND_A1_MINUS4	FIELD16(0x00ff)
+#define EEPROM_TSSI_BOUND_A1_MINUS3	FIELD16(0xff00)
+
+/*
+ * EEPROM temperature compensation boundaries 802.11A
+ * MINUS2: If the actual TSSI is below this boundary, tx power needs to be
+ *         reduced by (agc_step * -2)
+ * MINUS1: If the actual TSSI is below this boundary, tx power needs to be
+ *         reduced by (agc_step * -1)
+ */
+#define EEPROM_TSSI_BOUND_A2		0x006b
+#define EEPROM_TSSI_BOUND_A2_MINUS2	FIELD16(0x00ff)
+#define EEPROM_TSSI_BOUND_A2_MINUS1	FIELD16(0xff00)
+
+/*
+ * EEPROM temperature compensation boundaries 802.11A
+ * REF: Reference TSSI value, no tx power changes needed
+ * PLUS1: If the actual TSSI is above this boundary, tx power needs to be
+ *        increased by (agc_step * 1)
+ */
+#define EEPROM_TSSI_BOUND_A3		0x006c
+#define EEPROM_TSSI_BOUND_A3_REF	FIELD16(0x00ff)
+#define EEPROM_TSSI_BOUND_A3_PLUS1	FIELD16(0xff00)
+
+/*
+ * EEPROM temperature compensation boundaries 802.11A
+ * PLUS2: If the actual TSSI is above this boundary, tx power needs to be
+ *        increased by (agc_step * 2)
+ * PLUS3: If the actual TSSI is above this boundary, tx power needs to be
+ *        increased by (agc_step * 3)
+ */
+#define EEPROM_TSSI_BOUND_A4		0x006d
+#define EEPROM_TSSI_BOUND_A4_PLUS2	FIELD16(0x00ff)
+#define EEPROM_TSSI_BOUND_A4_PLUS3	FIELD16(0xff00)
+
+/*
+ * EEPROM temperature compensation boundaries 802.11A
+ * PLUS4: If the actual TSSI is above this boundary, tx power needs to be
+ *        increased by (agc_step * 4)
+ * AGC_STEP: Temperature compensation step.
+ */
+#define EEPROM_TSSI_BOUND_A5		0x006e
+#define EEPROM_TSSI_BOUND_A5_PLUS4	FIELD16(0x00ff)
+#define EEPROM_TSSI_BOUND_A5_AGC_STEP	FIELD16(0xff00)
 
 /*
  * EEPROM TXPOWER by rate: tx power per tx rate for HT20 mode
@@ -2046,6 +2302,12 @@ struct mac_iveiv_entry {
 
 /*
  * MCU mailbox commands.
+ * MCU_SLEEP - go to power-save mode.
+ *             arg1: 1: save as much power as possible, 0: save less power.
+ *             status: 1: success, 2: already asleep,
+ *                     3: maybe MAC is busy so can't finish this task.
+ * MCU_RADIO_OFF
+ *             arg0: 0: do power-saving, NOT turn off radio.
  */
 #define MCU_SLEEP			0x30
 #define MCU_WAKEUP			0x31
@@ -2058,13 +2320,18 @@ struct mac_iveiv_entry {
 #define MCU_LED_LED_POLARITY		0x54
 #define MCU_RADAR			0x60
 #define MCU_BOOT_SIGNAL			0x72
+#define MCU_ANT_SELECT			0X73
 #define MCU_BBP_SIGNAL			0x80
 #define MCU_POWER_SAVE			0x83
+#define MCU_BAND_SELECT		0x91
 
 /*
  * MCU mailbox tokens
  */
-#define TOKEN_WAKUP			3
+#define TOKEN_SLEEP			1
+#define TOKEN_RADIO_OFF			2
+#define TOKEN_WAKEUP			3
+
 
 /*
  * DMA descriptor defines.
@@ -2201,5 +2468,29 @@ struct mac_iveiv_entry {
 
 #define TXPOWER_A_TO_DEV(__txpower) \
 	clamp_t(char, __txpower, MIN_A_TXPOWER, MAX_A_TXPOWER)
+
+/*
+ *  Board's maximun TX power limitation
+ */
+#define EIRP_MAX_TX_POWER_LIMIT	0x50
+
+/*
+ * Number of TBTT intervals after which we have to adjust
+ * the hw beacon timer.
+ */
+#define BCN_TBTT_OFFSET 64
+
+/*
+ * RT2800 driver data structure
+ */
+struct rt2800_drv_data {
+	u8 calibration_bw20;
+	u8 calibration_bw40;
+	u8 bbp25;
+	u8 bbp26;
+	u8 txmixer_gain_24g;
+	u8 txmixer_gain_5g;
+	unsigned int tbtt_tick;
+};
 
 #endif /* RT2800_H */

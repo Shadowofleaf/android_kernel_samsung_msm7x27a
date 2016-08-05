@@ -29,7 +29,6 @@
 #include <linux/mutex.h>
 
 #include <asm/uaccess.h>
-#include <asm/system.h>
 #include <asm/io.h>
 #include <asm/rtc.h>
 
@@ -345,7 +344,7 @@ static long pcf8563_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned
 	int ret;
 
 	mutex_lock(&pcf8563_mutex);
-	return pcf8563_ioctl(filp, cmd, arg);
+	ret = pcf8563_ioctl(filp, cmd, arg);
 	mutex_unlock(&pcf8563_mutex);
 
 	return ret;

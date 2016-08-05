@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2011, Intel Corp.
+ * Copyright (C) 2000 - 2012, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -48,7 +48,7 @@
 
 #define _COMPONENT          ACPI_EVENTS
 ACPI_MODULE_NAME("evgpe")
-
+#if (!ACPI_REDUCED_HARDWARE)	/* Entire module */
 /* Local prototypes */
 static void ACPI_SYSTEM_XFACE acpi_ev_asynch_execute_gpe_method(void *context);
 
@@ -372,6 +372,15 @@ u32 acpi_ev_gpe_detect(struct acpi_gpe_xrupt_info * gpe_xrupt_list)
 			/* Get the next status/enable pair */
 
 			gpe_register_info = &gpe_block->register_info[i];
+
+			/*
+			 * Optimization: If there are no GPEs enabled within this
+			 * register, we can safely ignore the entire register.
+			 */
+			if (!(gpe_register_info->enable_for_run |
+			      gpe_register_info->enable_for_wake)) {
+				continue;
+			}
 
 			/* Read the Status Register */
 
@@ -757,3 +766,5 @@ acpi_ev_gpe_dispatch(struct acpi_namespace_node *gpe_device,
 
 	return_UINT32(ACPI_INTERRUPT_HANDLED);
 }
+
+#endif				/* !ACPI_REDUCED_HARDWARE */

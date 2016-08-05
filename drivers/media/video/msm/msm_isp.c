@@ -1,4 +1,4 @@
-/* Copyright (c) 2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -11,6 +11,7 @@
  *
  */
 
+#include <linux/export.h>
 #include <linux/workqueue.h>
 #include <linux/delay.h>
 #include <linux/types.h>
@@ -25,6 +26,8 @@
 #include <media/v4l2-dev.h>
 #include <media/v4l2-ioctl.h>
 #include <media/v4l2-device.h>
+#include <media/msm_isp.h>
+#include <media/msm_gemini.h>
 
 #include "msm.h"
 
@@ -33,111 +36,14 @@
 #else
 #define D(fmt, args...) do {} while (0)
 #endif
-#define ERR_USER_COPY(to) pr_err("%s(%d): copy %s user\n", \
-				__func__, __LINE__, ((to) ? "to" : "from"))
-#define ERR_COPY_FROM_USER() ERR_USER_COPY(0)
-#define ERR_COPY_TO_USER() ERR_USER_COPY(1)
 
-#define MSM_FRAME_AXI_MAX_BUF 16
-/* This will enqueue ISP events or signal buffer completion */
-static int msm_isp_enqueue(struct msm_cam_media_controller *pmctl,
-				struct msm_vfe_resp *data,
-				enum msm_queue qtype)
-{
-	struct v4l2_event v4l2_evt;
-
-	struct msm_stats_buf stats;
-	struct msm_isp_stats_event_ctrl *isp_event;
-	isp_event = (struct msm_isp_stats_event_ctrl *)v4l2_evt.u.data;
-	if (!data) {
-		pr_err("%s !!!!data = 0x%p\n", __func__, data);
-		return -EINVAL;
-	}
-
-	D("%s data->type = %d\n", __func__, data->type);
-
-	switch (qtype) {
-	case MSM_CAM_Q_VFE_EVT:
-	case MSM_CAM_Q_VFE_MSG:
-		/* adsp event and message */
-		v4l2_evt.type = V4L2_EVENT_PRIVATE_START +
-					MSM_CAM_RESP_STAT_EVT_MSG;
-
-		isp_event->resptype = MSM_CAM_RESP_STAT_EVT_MSG;
-
-		/* 0 - msg from aDSP, 1 - event from mARM */
-		isp_event->isp_data.isp_msg.type   = data->evt_msg.type;
-		isp_event->isp_data.isp_msg.msg_id = data->evt_msg.msg_id;
-		isp_event->isp_data.isp_msg.len	= 0;
-
-		D("%s: qtype %d length %d msd_id %d\n", __func__,
-					qtype,
-					isp_event->isp_data.isp_msg.len,
-					isp_event->isp_data.isp_msg.msg_id);
-
-		if ((data->type >= VFE_MSG_STATS_AEC) &&
-			(data->type <=  VFE_MSG_STATS_WE)) {
-
-			D("%s data->phy.sbuf_phy = 0x%x\n", __func__,
-						data->phy.sbuf_phy);
-			stats.buffer = msm_pmem_stats_ptov_lookup(&pmctl->sync,
-							data->phy.sbuf_phy,
-							&(stats.fd));
-			if (!stats.buffer) {
-				pr_err("%s: msm_pmem_stats_ptov_lookup error\n",
-								__func__);
-				isp_event->isp_data.isp_msg.len = 0;
-			} else {
-				struct msm_stats_buf *stats_buf =
-					kmalloc(sizeof(struct msm_stats_buf),
-								GFP_ATOMIC);
-				if (!stats_buf) {
-					pr_err("%s: out of memory.\n",
-								__func__);
-					return -ENOMEM;
-				}
-
-				*stats_buf = stats;
-				isp_event->isp_data.isp_msg.len	=
-						sizeof(struct msm_stats_buf);
-				isp_event->isp_data.isp_msg.data = stats_buf;
-			}
-
-		} else if ((data->evt_msg.len > 0) &&
-				(data->type == VFE_MSG_GENERAL)) {
-			isp_event->isp_data.isp_msg.data =
-					kmalloc(data->evt_msg.len, GFP_ATOMIC);
-			if (!isp_event->isp_data.isp_msg.data) {
-				pr_err("%s: out of memory.\n", __func__);
-				return -ENOMEM;
-			}
-			memcpy(isp_event->isp_data.isp_msg.data,
-						data->evt_msg.data,
-						data->evt_msg.len);
-		} else if (data->type == VFE_MSG_OUTPUT_P ||
-			data->type == VFE_MSG_OUTPUT_V ||
-			data->type == VFE_MSG_OUTPUT_S ||
-			data->type == VFE_MSG_OUTPUT_T) {
-			msm_mctl_buf_done(pmctl, data->type,
-					(u32)data->phy.y_phy);
-		}
-		break;
-	default:
-		break;
-	}
-
-	/* now queue the event */
-	v4l2_event_queue(pmctl->config_device->config_stat_event_queue.pvdev,
-					  &v4l2_evt);
-	return 0;
-}
+#define MSM_FRAME_AXI_MAX_BUF 32
 
 /*
  * This function executes in interrupt context.
  */
 
 void *msm_isp_sync_alloc(int size,
-	  void *syncdata __attribute__((unused)),
 	  gfp_t gfp)
 {
 	struct msm_queue_cmd *qcmd =
@@ -161,101 +67,446 @@ void msm_isp_sync_free(void *ptr)
 	}
 }
 
+static int msm_isp_notify_VFE_SOF_COUNT_EVT(struct v4l2_subdev *sd, void *arg)
+{
+	struct msm_vfe_cfg_cmd cfgcmd;
+	struct msm_camvfe_params vfe_params;
+	int rc;
+
+	cfgcmd.cmd_type = CMD_VFE_PIX_SOF_COUNT_UPDATE;
+	cfgcmd.value = NULL;
+	vfe_params.vfe_cfg = &cfgcmd;
+	vfe_params.data = arg;
+	rc = v4l2_subdev_call(sd, core, ioctl, 0, &vfe_params);
+	return 0;
+}
+
+int msm_isp_vfe_msg_to_img_mode(struct msm_cam_media_controller *pmctl,
+				int vfe_msg)
+{
+	int image_mode;
+	uint32_t vfe_output_mode = pmctl->vfe_output_mode;
+	vfe_output_mode &= ~(VFE_OUTPUTS_RDI0|
+		VFE_OUTPUTS_RDI1|VFE_OUTPUTS_RDI2);
+	if (vfe_msg == VFE_MSG_OUTPUT_PRIMARY) {
+		switch (vfe_output_mode) {
+		case VFE_OUTPUTS_MAIN_AND_PREVIEW:
+		case VFE_OUTPUTS_MAIN_AND_VIDEO:
+		case VFE_OUTPUTS_MAIN_AND_THUMB:
+		case VFE_OUTPUTS_RAW:
+		case VFE_OUTPUTS_JPEG_AND_THUMB:
+			image_mode = MSM_V4L2_EXT_CAPTURE_MODE_MAIN;
+			break;
+		case VFE_OUTPUTS_THUMB_AND_MAIN:
+			image_mode = MSM_V4L2_EXT_CAPTURE_MODE_THUMBNAIL;
+			break;
+		case VFE_OUTPUTS_VIDEO:
+		case VFE_OUTPUTS_VIDEO_AND_PREVIEW:
+			image_mode = MSM_V4L2_EXT_CAPTURE_MODE_VIDEO;
+			break;
+		case VFE_OUTPUTS_PREVIEW:
+		case VFE_OUTPUTS_PREVIEW_AND_VIDEO:
+			image_mode = MSM_V4L2_EXT_CAPTURE_MODE_PREVIEW;
+			break;
+		default:
+			image_mode = -1;
+			break;
+		}
+	} else if (vfe_msg == VFE_MSG_OUTPUT_SECONDARY) {
+		switch (vfe_output_mode) {
+		case VFE_OUTPUTS_MAIN_AND_PREVIEW:
+		case VFE_OUTPUTS_VIDEO_AND_PREVIEW:
+			image_mode = MSM_V4L2_EXT_CAPTURE_MODE_PREVIEW;
+			break;
+		case VFE_OUTPUTS_MAIN_AND_VIDEO:
+		case VFE_OUTPUTS_PREVIEW_AND_VIDEO:
+			image_mode = MSM_V4L2_EXT_CAPTURE_MODE_VIDEO;
+			break;
+		case VFE_OUTPUTS_MAIN_AND_THUMB:
+			image_mode = MSM_V4L2_EXT_CAPTURE_MODE_THUMBNAIL;
+			break;
+		case VFE_OUTPUTS_THUMB_AND_MAIN:
+			image_mode = MSM_V4L2_EXT_CAPTURE_MODE_MAIN;
+			break;
+		case VFE_OUTPUTS_JPEG_AND_THUMB:
+			image_mode = MSM_V4L2_EXT_CAPTURE_MODE_THUMBNAIL;
+			break;
+		case VFE_OUTPUTS_PREVIEW:
+		case VFE_OUTPUTS_VIDEO:
+			image_mode = MSM_V4L2_EXT_CAPTURE_MODE_PREVIEW;
+			break;
+		default:
+			image_mode = -1;
+			break;
+		}
+	} else if (vfe_msg == VFE_MSG_OUTPUT_TERTIARY1) {
+		if (pmctl->vfe_output_mode & VFE_OUTPUTS_RDI0)
+			image_mode = MSM_V4L2_EXT_CAPTURE_MODE_RDI;
+		else
+			image_mode = -1;
+	} else if (vfe_msg == VFE_MSG_OUTPUT_TERTIARY2) {
+		if (pmctl->vfe_output_mode & VFE_OUTPUTS_RDI1)
+			image_mode = MSM_V4L2_EXT_CAPTURE_MODE_RDI1;
+		else
+			image_mode = -1;
+	} else if (vfe_msg == VFE_MSG_OUTPUT_TERTIARY3) {
+		if (pmctl->vfe_output_mode & VFE_OUTPUTS_RDI2)
+			image_mode = MSM_V4L2_EXT_CAPTURE_MODE_RDI2;
+		else
+			image_mode = -1;
+	} else
+		image_mode = -1;
+
+	D("%s Selected image mode %d vfe output mode %d, vfe msg %d\n",
+	  __func__, image_mode, pmctl->vfe_output_mode, vfe_msg);
+	return image_mode;
+}
+
+static int msm_isp_notify_VFE_BUF_EVT(struct msm_cam_media_controller *pmctl,
+					struct v4l2_subdev *sd, void *arg)
+{
+	int rc = -EINVAL;
+	struct msm_vfe_resp *vdata = (struct msm_vfe_resp *)arg;
+	struct msm_free_buf free_buf, temp_free_buf;
+	struct msm_camvfe_params vfe_params;
+	struct msm_vfe_cfg_cmd cfgcmd;
+	struct msm_cam_v4l2_device *pcam = pmctl->pcam_ptr;
+	struct msm_frame_info *frame_info =
+		(struct msm_frame_info *)vdata->evt_msg.data;
+	uint32_t vfe_id;
+	struct msm_cam_buf_handle buf_handle;
+
+	if (!pcam) {
+		pr_err("%s pcam is null. return\n", __func__);
+		msm_isp_sync_free(vdata);
+		return rc;
+	}
+	if (frame_info) {
+		vfe_id = frame_info->path;
+		buf_handle.buf_lookup_type = BUF_LOOKUP_BY_INST_HANDLE;
+		buf_handle.inst_handle = frame_info->inst_handle;
+	} else {
+		vfe_id = vdata->evt_msg.msg_id;
+		buf_handle.buf_lookup_type = BUF_LOOKUP_BY_IMG_MODE;
+		buf_handle.image_mode =
+			msm_isp_vfe_msg_to_img_mode(pmctl, vfe_id);
+	}
+
+	switch (vdata->type) {
+	case VFE_MSG_START:
+	case VFE_MSG_START_RECORDING:
+	case VFE_MSG_PREVIEW:
+		D("%s Got V32_START_*: Getting ping addr id = %d",
+						__func__, vfe_id);
+		msm_mctl_reserve_free_buf(pmctl, NULL,
+					&buf_handle, &free_buf);
+		cfgcmd.cmd_type = CMD_CONFIG_PING_ADDR;
+		cfgcmd.value = &vfe_id;
+		vfe_params.vfe_cfg = &cfgcmd;
+		vfe_params.data = (void *)&free_buf;
+		rc = v4l2_subdev_call(sd, core, ioctl, 0, &vfe_params);
+		msm_mctl_reserve_free_buf(pmctl, NULL,
+					&buf_handle, &free_buf);
+		cfgcmd.cmd_type = CMD_CONFIG_PONG_ADDR;
+		cfgcmd.value = &vfe_id;
+		vfe_params.vfe_cfg = &cfgcmd;
+		vfe_params.data = (void *)&free_buf;
+		rc = v4l2_subdev_call(sd, core, ioctl, 0, &vfe_params);
+		break;
+	case VFE_MSG_CAPTURE:
+		pr_debug("%s Got V32_CAPTURE: getting buffer for id = %d",
+						__func__, vfe_id);
+		msm_mctl_reserve_free_buf(pmctl, NULL,
+					&buf_handle, &free_buf);
+		cfgcmd.cmd_type = CMD_CONFIG_PING_ADDR;
+		cfgcmd.value = &vfe_id;
+		vfe_params.vfe_cfg = &cfgcmd;
+		vfe_params.data = (void *)&free_buf;
+		rc = v4l2_subdev_call(sd, core, ioctl, 0, &vfe_params);
+		temp_free_buf = free_buf;
+		if (msm_mctl_reserve_free_buf(pmctl, NULL,
+					&buf_handle, &free_buf)) {
+			/* Write the same buffer into PONG */
+			free_buf = temp_free_buf;
+		}
+		cfgcmd.cmd_type = CMD_CONFIG_PONG_ADDR;
+		cfgcmd.value = &vfe_id;
+		vfe_params.vfe_cfg = &cfgcmd;
+		vfe_params.data = (void *)&free_buf;
+		rc = v4l2_subdev_call(sd, core, ioctl, 0, &vfe_params);
+		break;
+	case VFE_MSG_JPEG_CAPTURE:
+		D("%s:VFE_MSG_JPEG_CAPTURE vdata->type %d\n", __func__,
+			vdata->type);
+		free_buf.num_planes = 2;
+		free_buf.ch_paddr[0] = pmctl->ping_imem_y;
+		free_buf.ch_paddr[1] = pmctl->ping_imem_cbcr;
+		cfgcmd.cmd_type = CMD_CONFIG_PING_ADDR;
+		cfgcmd.value = &vfe_id;
+		vfe_params.vfe_cfg = &cfgcmd;
+		vfe_params.data = (void *)&free_buf;
+		D("%s:VFE_MSG_JPEG_CAPTURE y_ping=%x cbcr_ping=%x\n",
+			__func__, free_buf.ch_paddr[0], free_buf.ch_paddr[1]);
+		rc = v4l2_subdev_call(sd, core, ioctl, 0, &vfe_params);
+		/* Write the same buffer into PONG */
+		free_buf.ch_paddr[0] = pmctl->pong_imem_y;
+		free_buf.ch_paddr[1] = pmctl->pong_imem_cbcr;
+		cfgcmd.cmd_type = CMD_CONFIG_PONG_ADDR;
+		cfgcmd.value = &vfe_id;
+		vfe_params.vfe_cfg = &cfgcmd;
+		vfe_params.data = (void *)&free_buf;
+		D("%s:VFE_MSG_JPEG_CAPTURE y_pong=%x cbcr_pong=%x\n",
+			__func__, free_buf.ch_paddr[0], free_buf.ch_paddr[1]);
+		rc = v4l2_subdev_call(sd, core, ioctl, 0, &vfe_params);
+		break;
+	case VFE_MSG_OUTPUT_IRQ:
+		D("%s Got OUTPUT_IRQ: Getting free buf id = %d",
+						__func__, vfe_id);
+		msm_mctl_reserve_free_buf(pmctl, NULL,
+					&buf_handle, &free_buf);
+		cfgcmd.cmd_type = CMD_CONFIG_FREE_BUF_ADDR;
+		cfgcmd.value = &vfe_id;
+		vfe_params.vfe_cfg = &cfgcmd;
+		vfe_params.data = (void *)&free_buf;
+		rc = v4l2_subdev_call(sd, core, ioctl, 0, &vfe_params);
+		break;
+	default:
+		pr_err("%s: Invalid vdata type: %d\n", __func__, vdata->type);
+		break;
+	}
+	return rc;
+}
+
 /*
  * This function executes in interrupt context.
  */
-static int msm_isp_notify(struct v4l2_subdev *sd, void *arg)
+static int msm_isp_notify_vfe(struct msm_cam_media_controller *pmctl,
+	struct v4l2_subdev *sd,	unsigned int notification,  void *arg)
 {
-	int rc = -EINVAL;
-	struct msm_queue_cmd *qcmd = NULL;
-	struct msm_sync *sync =
-		(struct msm_sync *)v4l2_get_subdev_hostdata(sd);
-	struct msm_vfe_resp *vdata = (struct msm_vfe_resp *)arg;
+	int rc = 0;
+	struct v4l2_event v4l2_evt;
+	struct msm_isp_event_ctrl *isp_event;
+	struct msm_free_buf buf;
 
-	if (!sync) {
+	if (!pmctl) {
 		pr_err("%s: no context in dsp callback.\n", __func__);
+		rc = -EINVAL;
 		return rc;
 	}
 
-	qcmd = ((struct msm_queue_cmd *)vdata) - 1;
-	qcmd->type = MSM_CAM_Q_VFE_MSG;
-	qcmd->command = vdata;
+	if (notification == NOTIFY_VFE_BUF_EVT)
+		return msm_isp_notify_VFE_BUF_EVT(pmctl, sd, arg);
 
-	D("%s: vdata->type %d\n", __func__, vdata->type);
-	switch (vdata->type) {
-	case VFE_MSG_STATS_AWB:
-		D("%s: qtype %d, AWB stats, enqueue event_q.\n",
-					__func__, vdata->type);
+	if (notification == NOTIFY_VFE_PIX_SOF_COUNT)
+		return msm_isp_notify_VFE_SOF_COUNT_EVT(sd, arg);
+
+	isp_event = kzalloc(sizeof(struct msm_isp_event_ctrl), GFP_ATOMIC);
+	if (!isp_event) {
+		pr_err("%s Insufficient memory. return", __func__);
+		return -ENOMEM;
+	}
+
+	v4l2_evt.type = V4L2_EVENT_PRIVATE_START +
+					MSM_CAM_RESP_STAT_EVT_MSG;
+	v4l2_evt.id = 0;
+
+	*((uint32_t *)v4l2_evt.u.data) = (uint32_t)isp_event;
+
+	isp_event->resptype = MSM_CAM_RESP_STAT_EVT_MSG;
+	isp_event->isp_data.isp_msg.type = MSM_CAMERA_MSG;
+	isp_event->isp_data.isp_msg.len = 0;
+
+	switch (notification) {
+	case NOTIFY_ISP_MSG_EVT: {
+		struct isp_msg_event *isp_msg = (struct isp_msg_event *)arg;
+
+		isp_event->isp_data.isp_msg.msg_id = isp_msg->msg_id;
+		isp_event->isp_data.isp_msg.frame_id = isp_msg->sof_count;
+		getnstimeofday(&(isp_event->isp_data.isp_msg.timestamp));
 		break;
-
-	case VFE_MSG_STATS_AEC:
-		D("%s: qtype %d, AEC stats, enqueue event_q.\n",
-					__func__, vdata->type);
+	}
+	case NOTIFY_VFE_MSG_OUT: {
+		uint8_t msgid;
+		struct msm_cam_buf_handle buf_handle;
+		struct isp_msg_output *isp_output =
+				(struct isp_msg_output *)arg;
+		if (!isp_output->buf.inst_handle) {
+			switch (isp_output->output_id) {
+			case MSG_ID_OUTPUT_P:
+				msgid = VFE_MSG_OUTPUT_P;
+				break;
+			case MSG_ID_OUTPUT_V:
+				msgid = VFE_MSG_OUTPUT_V;
+				break;
+			case MSG_ID_OUTPUT_T:
+				msgid = VFE_MSG_OUTPUT_T;
+				break;
+			case MSG_ID_OUTPUT_S:
+				msgid = VFE_MSG_OUTPUT_S;
+				break;
+			case MSG_ID_OUTPUT_PRIMARY:
+				msgid = VFE_MSG_OUTPUT_PRIMARY;
+				break;
+			case MSG_ID_OUTPUT_SECONDARY:
+				msgid = VFE_MSG_OUTPUT_SECONDARY;
+				break;
+			case MSG_ID_OUTPUT_TERTIARY1:
+				msgid = VFE_MSG_OUTPUT_TERTIARY1;
+				break;
+			case MSG_ID_OUTPUT_TERTIARY2:
+				msgid = VFE_MSG_OUTPUT_TERTIARY2;
+				break;
+			case MSG_ID_OUTPUT_TERTIARY3:
+				msgid = VFE_MSG_OUTPUT_TERTIARY3;
+				break;
+			default:
+				pr_err("%s: Invalid VFE output id: %d\n",
+					   __func__, isp_output->output_id);
+				rc = -EINVAL;
+				break;
+			}
+			if (!rc) {
+				buf_handle.buf_lookup_type =
+					BUF_LOOKUP_BY_IMG_MODE;
+				buf_handle.image_mode =
+				msm_isp_vfe_msg_to_img_mode(pmctl, msgid);
+			}
+		} else {
+			buf_handle.buf_lookup_type = BUF_LOOKUP_BY_INST_HANDLE;
+			buf_handle.inst_handle = isp_output->buf.inst_handle;
+		}
+		isp_event->isp_data.isp_msg.msg_id =
+			isp_output->output_id;
+		isp_event->isp_data.isp_msg.frame_id =
+			isp_output->frameCounter;
+		buf = isp_output->buf;
+		msm_mctl_buf_done(pmctl, &buf_handle,
+			&buf, isp_output->frameCounter);
+		}
 		break;
+	case NOTIFY_VFE_MSG_COMP_STATS: {
+		struct msm_stats_buf *stats = (struct msm_stats_buf *)arg;
+		struct msm_stats_buf *stats_buf = NULL;
 
-	case VFE_MSG_STATS_IHIST:
-		D("%s: qtype %d, ihist stats, enqueue event_q.\n",
-					__func__, vdata->type);
+		isp_event->isp_data.isp_msg.msg_id = MSG_ID_STATS_COMPOSITE;
+		CDBG("%s: aec (%d, %x) awb (%d, %x) af (%d, %x) ", __func__,
+			stats->aec.fd, (uint32_t)stats->aec.buff,
+			stats->awb.fd, (uint32_t)stats->awb.buff,
+			stats->af.fd, (uint32_t)stats->af.buff);
+		CDBG("%s: rs (%d, %x) cs(%d, %x) ihist(%d, %x)", __func__,
+			stats->rs.fd, (uint32_t)stats->rs.buff,
+			stats->cs.fd, (uint32_t)stats->cs.buff,
+			stats->ihist.fd, (uint32_t)stats->ihist.buff);
+		CDBG("%s:bhist/skin(%d, %x) ", __func__,
+			stats->skin.fd, (uint32_t)stats->skin.buff);
+
+		stats_buf = kmalloc(sizeof(struct msm_stats_buf), GFP_ATOMIC);
+		if (!stats_buf) {
+			pr_err("%s: out of memory.\n", __func__);
+			rc = -ENOMEM;
+		} else {
+			*stats_buf = *stats;
+			isp_event->isp_data.isp_msg.len	=
+				sizeof(struct msm_stats_buf);
+			isp_event->isp_data.isp_msg.data = stats_buf;
+		}
+		}
 		break;
+	case NOTIFY_VFE_MSG_STATS: {
+		struct msm_stats_buf stats;
+		struct isp_msg_stats *isp_stats = (struct isp_msg_stats *)arg;
 
-	case VFE_MSG_STATS_RS:
-		D("%s: qtype %d, rs stats, enqueue event_q.\n",
-					__func__, vdata->type);
-		break;
-
-	case VFE_MSG_STATS_CS:
-		D("%s: qtype %d, cs stats, enqueue event_q.\n",
-					__func__, vdata->type);
-	break;
-
-	case VFE_MSG_GENERAL:
-		D("%s: qtype %d, general msg, enqueue event_q.\n",
-					__func__, vdata->type);
+		memset(&stats, 0, sizeof(stats));
+		isp_event->isp_data.isp_msg.msg_id = isp_stats->id;
+		isp_event->isp_data.isp_msg.frame_id =
+			isp_stats->frameCounter;
+		stats.buffer = isp_stats->buffer;
+		stats.fd = isp_stats->fd;
+		/* buf_idx used for O(0) lookup */
+		stats.buf_idx = isp_stats->buf_idx;
+		switch (isp_stats->id) {
+		case MSG_ID_STATS_AEC:
+		case MSG_ID_STATS_BG:
+			stats.aec.buff = stats.buffer;
+			stats.aec.fd = stats.fd;
+			break;
+		case MSG_ID_STATS_AF:
+		case MSG_ID_STATS_BF:
+			stats.af.buff = stats.buffer;
+			stats.af.fd = stats.fd;
+			break;
+		case MSG_ID_STATS_AWB:
+			stats.awb.buff = stats.buffer;
+			stats.awb.fd = stats.fd;
+			break;
+		case MSG_ID_STATS_IHIST:
+			stats.ihist.buff = stats.buffer;
+			stats.ihist.fd = stats.fd;
+			break;
+		case MSG_ID_STATS_RS:
+			stats.rs.buff = stats.buffer;
+			stats.rs.fd = stats.fd;
+			break;
+		case MSG_ID_STATS_CS:
+			stats.cs.buff = stats.buffer;
+			stats.cs.fd = stats.fd;
+			break;
+		case MSG_ID_STATS_BHIST:
+			stats.skin.buff = stats.buffer;
+			stats.skin.fd = stats.fd;
+			break;
+		case MSG_ID_STATS_AWB_AEC:
+			break;
+		default:
+			pr_err("%s: Invalid msg type", __func__);
+			break;
+		}
+		if (!stats.buffer) {
+			pr_err("%s: msm_pmem_stats_ptov_lookup error\n",
+							__func__);
+			isp_event->isp_data.isp_msg.len = 0;
+			rc = -EFAULT;
+		} else {
+			struct msm_stats_buf *stats_buf =
+				kmalloc(sizeof(struct msm_stats_buf),
+							GFP_ATOMIC);
+			if (!stats_buf) {
+				pr_err("%s: out of memory. stats_id = %d\n",
+					__func__, isp_stats->id);
+				rc = -ENOMEM;
+			} else {
+				*stats_buf = stats;
+				isp_event->isp_data.isp_msg.len	=
+					sizeof(struct msm_stats_buf);
+				isp_event->isp_data.isp_msg.data = stats_buf;
+			}
+		}
+		}
 		break;
 	default:
-		D("%s: qtype %d not handled\n", __func__, vdata->type);
-		/* fall through, send to config. */
+		pr_err("%s: Unsupport isp notification %d\n",
+			__func__, notification);
+		rc = -EINVAL;
+		break;
 	}
 
-	D("%s: msm_enqueue event_q\n", __func__);
-	rc = msm_isp_enqueue(&sync->pcam_sync->mctl, vdata, MSM_CAM_Q_VFE_MSG);
-
-	msm_isp_sync_free(vdata);
+	v4l2_event_queue(pmctl->config_device->config_stat_event_queue.pvdev,
+			 &v4l2_evt);
 
 	return rc;
 }
 
-/* This function is called by open() function, so we need to init HW*/
-static int msm_isp_open(struct v4l2_subdev *sd, struct msm_sync *sync)
+int msm_isp_notify(struct msm_cam_media_controller *pmctl,
+	struct v4l2_subdev *sd,	unsigned int notification, void *arg)
 {
-	/* init vfe and senor, register sync callbacks for init*/
-	int rc = 0;
-	D("%s\n", __func__);
-	if (!sync) {
-		pr_err("%s: param is NULL", __func__);
-		return -EINVAL;
-	}
-
-	rc = msm_vfe_subdev_init(sd, sync, sync->pdev);
-	if (rc < 0) {
-		pr_err("%s: vfe_init failed at %d\n",
-					__func__, rc);
-	}
-
-	return rc;
+	return msm_isp_notify_vfe(pmctl, sd, notification, arg);
 }
-
-static void msm_isp_release(struct msm_sync *psync)
-{
-	D("%s\n", __func__);
-	msm_vfe_subdev_release(psync->pdev);
-}
+EXPORT_SYMBOL(msm_isp_notify);
 
 static int msm_config_vfe(struct v4l2_subdev *sd,
-		struct msm_sync *sync, void __user *arg)
+	struct msm_cam_media_controller *mctl, void __user *arg)
 {
 	struct msm_vfe_cfg_cmd cfgcmd;
-	struct msm_pmem_region region[8];
 	struct axidata axi_data;
 
 	if (copy_from_user(&cfgcmd, arg, sizeof(cfgcmd))) {
@@ -266,84 +517,17 @@ static int msm_config_vfe(struct v4l2_subdev *sd,
 	memset(&axi_data, 0, sizeof(axi_data));
 	CDBG("%s: cmd_type %d\n", __func__, cfgcmd.cmd_type);
 	switch (cfgcmd.cmd_type) {
+	case CMD_STATS_BG_ENABLE:
+	case CMD_STATS_BF_ENABLE:
+	case CMD_STATS_BHIST_ENABLE:
 	case CMD_STATS_AF_ENABLE:
-		axi_data.bufnum1 =
-			msm_pmem_region_lookup(&sync->pmem_stats,
-					MSM_PMEM_AF, &region[0],
-					NUM_STAT_OUTPUT_BUFFERS);
-		if (!axi_data.bufnum1) {
-			pr_err("%s %d: pmem region lookup error\n",
-				__func__, __LINE__);
-			return -EINVAL;
-		}
-		axi_data.region = &region[0];
-		return msm_isp_subdev_ioctl(sd, &cfgcmd,
-							&axi_data);
 	case CMD_STATS_AEC_ENABLE:
-		axi_data.bufnum1 =
-			msm_pmem_region_lookup(&sync->pmem_stats,
-			MSM_PMEM_AEC, &region[0],
-			NUM_STAT_OUTPUT_BUFFERS);
-		if (!axi_data.bufnum1) {
-			pr_err("%s %d: pmem region lookup error\n",
-				__func__, __LINE__);
-			return -EINVAL;
-		}
-		axi_data.region = &region[0];
-		return msm_isp_subdev_ioctl(sd, &cfgcmd,
-							&axi_data);
 	case CMD_STATS_AWB_ENABLE:
-		axi_data.bufnum1 =
-			msm_pmem_region_lookup(&sync->pmem_stats,
-			MSM_PMEM_AWB, &region[0],
-			NUM_STAT_OUTPUT_BUFFERS);
-		if (!axi_data.bufnum1) {
-			pr_err("%s %d: pmem region lookup error\n",
-				__func__, __LINE__);
-			return -EINVAL;
-		}
-		axi_data.region = &region[0];
-		return msm_isp_subdev_ioctl(sd, &cfgcmd,
-							&axi_data);
+	case CMD_STATS_AEC_AWB_ENABLE:
 	case CMD_STATS_IHIST_ENABLE:
-		axi_data.bufnum1 =
-			msm_pmem_region_lookup(&sync->pmem_stats,
-			MSM_PMEM_IHIST, &region[0],
-			NUM_STAT_OUTPUT_BUFFERS);
-		if (!axi_data.bufnum1) {
-			pr_err("%s %d: pmem region lookup error\n",
-				__func__, __LINE__);
-			return -EINVAL;
-		}
-		axi_data.region = &region[0];
-		return msm_isp_subdev_ioctl(sd, &cfgcmd,
-							&axi_data);
 	case CMD_STATS_RS_ENABLE:
-		axi_data.bufnum1 =
-			msm_pmem_region_lookup(&sync->pmem_stats,
-			MSM_PMEM_RS, &region[0],
-			NUM_STAT_OUTPUT_BUFFERS);
-		if (!axi_data.bufnum1) {
-			pr_err("%s %d: pmem region lookup error\n",
-				__func__, __LINE__);
-			return -EINVAL;
-		}
-		axi_data.region = &region[0];
-		return msm_isp_subdev_ioctl(sd, &cfgcmd,
-							&axi_data);
 	case CMD_STATS_CS_ENABLE:
-		axi_data.bufnum1 =
-			msm_pmem_region_lookup(&sync->pmem_stats,
-			MSM_PMEM_CS, &region[0],
-			NUM_STAT_OUTPUT_BUFFERS);
-		if (!axi_data.bufnum1) {
-			pr_err("%s %d: pmem region lookup error\n",
-				__func__, __LINE__);
-			return -EINVAL;
-		}
-		axi_data.region = &region[0];
-		return msm_isp_subdev_ioctl(sd, &cfgcmd,
-							&axi_data);
+		return msm_isp_subdev_ioctl(sd, &cfgcmd, NULL);
 	case CMD_GENERAL:
 	case CMD_STATS_DISABLE:
 		return msm_isp_subdev_ioctl(sd, &cfgcmd,
@@ -356,243 +540,8 @@ static int msm_config_vfe(struct v4l2_subdev *sd,
 	return -EINVAL;
 }
 
-static int msm_vpe_frame_cfg(struct msm_sync *sync,
-				void *cfgcmdin)
-{
-	int rc = -EIO;
-	struct axidata axi_data;
-	void *data = &axi_data;
-	struct msm_pmem_region region[8];
-	int pmem_type;
-
-	struct msm_vpe_cfg_cmd *cfgcmd;
-	cfgcmd = (struct msm_vpe_cfg_cmd *)cfgcmdin;
-
-	memset(&axi_data, 0, sizeof(axi_data));
-	CDBG("In vpe_frame_cfg cfgcmd->cmd_type = %d\n",
-		cfgcmd->cmd_type);
-	switch (cfgcmd->cmd_type) {
-	case CMD_AXI_CFG_VPE:
-		pmem_type = MSM_PMEM_VIDEO_VPE;
-		axi_data.bufnum1 =
-			msm_pmem_region_lookup_2(&sync->pmem_frames, pmem_type,
-								&region[0], 8);
-		CDBG("axi_data.bufnum1 = %d\n", axi_data.bufnum1);
-		if (!axi_data.bufnum1) {
-			pr_err("%s %d: pmem region lookup error\n",
-				__func__, __LINE__);
-			return -EINVAL;
-		}
-		pmem_type = MSM_PMEM_VIDEO;
-		break;
-	default:
-		pr_err("%s: unknown command type %d\n",
-			__func__, cfgcmd->cmd_type);
-		break;
-	}
-	axi_data.region = &region[0];
-	CDBG("out vpe_frame_cfg cfgcmd->cmd_type = %d\n",
-		cfgcmd->cmd_type);
-	/* send the AXI configuration command to driver */
-	if (sync->vpefn.vpe_config)
-		rc = sync->vpefn.vpe_config(cfgcmd, data);
-	return rc;
-}
-
-static int msm_stats_axi_cfg(struct v4l2_subdev *sd,
-		struct msm_sync *sync, struct msm_vfe_cfg_cmd *cfgcmd)
-{
-	int rc = -EIO;
-	struct axidata axi_data;
-	void *data = &axi_data;
-	struct msm_pmem_region region[3];
-	int pmem_type = MSM_PMEM_MAX;
-
-	memset(&axi_data, 0, sizeof(axi_data));
-
-	switch (cfgcmd->cmd_type) {
-	case CMD_STATS_AXI_CFG:
-		pmem_type = MSM_PMEM_AEC_AWB;
-		break;
-	case CMD_STATS_AF_AXI_CFG:
-		pmem_type = MSM_PMEM_AF;
-		break;
-	case CMD_GENERAL:
-		data = NULL;
-		break;
-	default:
-		pr_err("%s: unknown command type %d\n",
-			__func__, cfgcmd->cmd_type);
-		return -EINVAL;
-	}
-
-	if (cfgcmd->cmd_type != CMD_GENERAL) {
-		axi_data.bufnum1 =
-			msm_pmem_region_lookup(&sync->pmem_stats, pmem_type,
-				&region[0], NUM_STAT_OUTPUT_BUFFERS);
-		if (!axi_data.bufnum1) {
-			pr_err("%s %d: pmem region lookup error\n",
-				__func__, __LINE__);
-			return -EINVAL;
-		}
-		axi_data.region = &region[0];
-	}
-
-	/* send the AEC/AWB STATS configuration command to driver */
-	rc = msm_isp_subdev_ioctl(sd, cfgcmd, data);
-	return rc;
-}
-
-static int msm_frame_axi_cfg(struct v4l2_subdev *sd,
-	struct msm_sync *sync, struct msm_vfe_cfg_cmd *cfgcmd)
-{
-	int rc = -EIO;
-	struct axidata axi_data;
-	void *data = &axi_data;
-	struct msm_pmem_region region[MSM_FRAME_AXI_MAX_BUF];
-	int pmem_type;
-	int i = 0;
-	int idx = 0;
-	struct msm_cam_v4l2_device *pcam = sync->pcam_sync;
-	struct msm_cam_v4l2_dev_inst *pcam_inst;
-
-	memset(&axi_data, 0, sizeof(axi_data));
-
-	switch (cfgcmd->cmd_type) {
-
-	case CMD_AXI_CFG_PREVIEW:
-		pcam_inst =
-		pcam->dev_inst_map[MSM_V4L2_EXT_CAPTURE_MODE_PREVIEW];
-		if (pcam_inst)
-			idx = pcam_inst->my_index;
-		else
-			return rc;
-		pmem_type = MSM_PMEM_PREVIEW;
-		axi_data.bufnum2 =
-			msm_pmem_region_lookup_3(sync->pcam_sync, idx,
-				&region[0], pmem_type);
-		if (!axi_data.bufnum2) {
-			pr_err("%s %d: pmem region 3 lookup error\n",
-				__func__, __LINE__);
-			return -EINVAL;
-		}
-		D("%s __func__ axi_data.bufnum2 = %d\n", __func__,
-						axi_data.bufnum2);
-		break;
-
-	case CMD_AXI_CFG_VIDEO:
-		pcam_inst =
-		pcam->dev_inst_map[MSM_V4L2_EXT_CAPTURE_MODE_PREVIEW];
-		if (pcam_inst)
-			idx = pcam_inst->my_index;
-		else
-			return rc;
-		pmem_type = MSM_PMEM_PREVIEW;
-		axi_data.bufnum1 =
-			msm_pmem_region_lookup_3(sync->pcam_sync, idx,
-				&region[0], pmem_type);
-		D("%s bufnum1 = %d\n", __func__, axi_data.bufnum1);
-		if (!axi_data.bufnum1) {
-			pr_err("%s %d: pmem region lookup error\n",
-				__func__, __LINE__);
-			return -EINVAL;
-		}
-
-		pcam_inst
-		= pcam->dev_inst_map[MSM_V4L2_EXT_CAPTURE_MODE_VIDEO];
-		if (pcam_inst)
-			idx = pcam_inst->my_index;
-			pmem_type = MSM_PMEM_VIDEO;
-			axi_data.bufnum2 =
-			msm_pmem_region_lookup_3(sync->pcam_sync, idx,
-				&region[axi_data.bufnum1], pmem_type);
-		D("%s bufnum2 = %d\n", __func__, axi_data.bufnum2);
-		if (!axi_data.bufnum2) {
-			pr_err("%s %d: pmem region lookup error\n",
-				__func__, __LINE__);
-			return -EINVAL;
-		}
-		break;
-
-
-	case CMD_AXI_CFG_SNAP:
-		pcam_inst
-		= pcam->dev_inst_map[MSM_V4L2_EXT_CAPTURE_MODE_THUMBNAIL];
-		if (pcam_inst)
-			idx = pcam_inst->my_index;
-		else
-			return rc;
-		pmem_type = MSM_PMEM_THUMBNAIL;
-		axi_data.bufnum1 =
-			msm_pmem_region_lookup_3(sync->pcam_sync, idx,
-				&region[0], pmem_type);
-		if (!axi_data.bufnum1) {
-			pr_err("%s %d: pmem region lookup error\n",
-				__func__, __LINE__);
-			return -EINVAL;
-		}
-
-		pcam_inst
-		= pcam->dev_inst_map[MSM_V4L2_EXT_CAPTURE_MODE_MAIN];
-		if (pcam_inst)
-			idx = pcam_inst->my_index;
-		else
-			return rc;
-		pmem_type = MSM_PMEM_MAINIMG;
-		axi_data.bufnum2 =
-		msm_pmem_region_lookup_3(sync->pcam_sync, idx,
-				&region[axi_data.bufnum1], pmem_type);
-		if (!axi_data.bufnum2) {
-			pr_err("%s %d: pmem region lookup error\n",
-				__func__, __LINE__);
-			return -EINVAL;
-		}
-		break;
-
-	case CMD_RAW_PICT_AXI_CFG:
-		pcam_inst
-		= pcam->dev_inst_map[MSM_V4L2_EXT_CAPTURE_MODE_MAIN];
-		if (pcam_inst)
-			idx = pcam_inst->my_index;
-		else
-			return rc;
-		pmem_type = MSM_PMEM_RAW_MAINIMG;
-		axi_data.bufnum2 =
-			msm_pmem_region_lookup_3(sync->pcam_sync, idx,
-				&region[0], pmem_type);
-		if (!axi_data.bufnum2) {
-			pr_err("%s %d: pmem region lookup error\n",
-				__func__, __LINE__);
-			return -EINVAL;
-		}
-		break;
-
-	case CMD_GENERAL:
-		data = NULL;
-		break;
-
-	default:
-		pr_err("%s: unknown command type %d\n",
-			__func__, cfgcmd->cmd_type);
-		return -EINVAL;
-	}
-
-	axi_data.region = &region[0];
-	D("%s bufnum1 = %d, bufnum2 = %d\n", __func__,
-	  axi_data.bufnum1, axi_data.bufnum2);
-	for (i = 0; i < MSM_FRAME_AXI_MAX_BUF; i++) {
-		D("%s region %d paddr = 0x%p\n", __func__, i,
-					(void *)region[i].paddr);
-		D("%s region y_off = %d cbcr_off = %d\n", __func__,
-			region[i].info.y_off, region[i].info.cbcr_off);
-	}
-	/* send the AXI configuration command to driver */
-	rc = msm_isp_subdev_ioctl(sd, cfgcmd, data);
-	return rc;
-}
-
 static int msm_axi_config(struct v4l2_subdev *sd,
-			struct msm_sync *sync, void __user *arg)
+		struct msm_cam_media_controller *mctl, void __user *arg)
 {
 	struct msm_vfe_cfg_cmd cfgcmd;
 
@@ -602,18 +551,24 @@ static int msm_axi_config(struct v4l2_subdev *sd,
 	}
 
 	switch (cfgcmd.cmd_type) {
-	case CMD_AXI_CFG_VIDEO:
-	case CMD_AXI_CFG_PREVIEW:
-	case CMD_AXI_CFG_SNAP:
+	case CMD_AXI_CFG_PRIM:
+	case CMD_AXI_CFG_SEC:
+	case CMD_AXI_CFG_ZSL:
 	case CMD_RAW_PICT_AXI_CFG:
-		return msm_frame_axi_cfg(sd, sync, &cfgcmd);
-	case CMD_AXI_CFG_VPE:
-		return 0;
-		return msm_vpe_frame_cfg(sync, (void *)&cfgcmd);
-
-	case CMD_STATS_AXI_CFG:
-	case CMD_STATS_AF_AXI_CFG:
-		return msm_stats_axi_cfg(sd, sync, &cfgcmd);
+	case CMD_AXI_CFG_PRIM_ALL_CHNLS:
+	case CMD_AXI_CFG_PRIM|CMD_AXI_CFG_SEC:
+	case CMD_AXI_CFG_PRIM|CMD_AXI_CFG_SEC_ALL_CHNLS:
+	case CMD_AXI_CFG_PRIM_ALL_CHNLS|CMD_AXI_CFG_SEC:
+	case CMD_AXI_START:
+	case CMD_AXI_STOP:
+	case CMD_AXI_CFG_TERT1:
+	case CMD_AXI_CFG_TERT2:
+	case CMD_AXI_CFG_TERT3:
+		/* Dont need to pass buffer information.
+		 * subdev will get the buffer from media
+		 * controller free queue.
+		 */
+		return msm_isp_subdev_ioctl(sd, &cfgcmd, NULL);
 
 	default:
 		pr_err("%s: unknown command type %d\n",
@@ -625,39 +580,8 @@ static int msm_axi_config(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int msm_set_crop(struct msm_sync *sync, void __user *arg)
-{
-	struct crop_info crop;
-
-	if (copy_from_user(&crop,
-				arg,
-				sizeof(struct crop_info))) {
-		ERR_COPY_FROM_USER();
-		return -EFAULT;
-	}
-
-	if (!sync->croplen) {
-		sync->cropinfo = kmalloc(crop.len, GFP_KERNEL);
-		if (!sync->cropinfo)
-			return -ENOMEM;
-	} else if (sync->croplen < crop.len)
-		return -EINVAL;
-
-	if (copy_from_user(sync->cropinfo,
-				crop.info,
-				crop.len)) {
-		ERR_COPY_FROM_USER();
-		kfree(sync->cropinfo);
-		return -EFAULT;
-	}
-
-	sync->croplen = crop.len;
-
-	return 0;
-}
-
 static int msm_put_stats_buffer(struct v4l2_subdev *sd,
-			struct msm_sync *sync, void __user *arg)
+			struct msm_cam_media_controller *mctl, void __user *arg)
 {
 	int rc = -EIO;
 
@@ -672,7 +596,7 @@ static int msm_put_stats_buffer(struct v4l2_subdev *sd,
 	}
 
 	CDBG("%s\n", __func__);
-	pphy = msm_pmem_stats_vtop_lookup(sync, buf.buffer, buf.fd);
+	pphy = msm_pmem_stats_vtop_lookup(mctl, buf.buffer, buf.fd);
 
 	if (pphy != 0) {
 		if (buf.type == STAT_AF)
@@ -687,6 +611,14 @@ static int msm_put_stats_buffer(struct v4l2_subdev *sd,
 			cfgcmd.cmd_type = CMD_STATS_RS_BUF_RELEASE;
 		else if (buf.type == STAT_CS)
 			cfgcmd.cmd_type = CMD_STATS_CS_BUF_RELEASE;
+		else if (buf.type == STAT_AEAW)
+			cfgcmd.cmd_type = CMD_STATS_BUF_RELEASE;
+		else if (buf.type == STAT_BG)
+			cfgcmd.cmd_type = CMD_STATS_BG_BUF_RELEASE;
+		else if (buf.type == STAT_BF)
+			cfgcmd.cmd_type = CMD_STATS_BF_BUF_RELEASE;
+		else if (buf.type == STAT_BHIST)
+			cfgcmd.cmd_type = CMD_STATS_BHIST_BUF_RELEASE;
 
 		else {
 			pr_err("%s: invalid buf type %d\n",
@@ -708,47 +640,108 @@ put_done:
 	return rc;
 }
 
+static int msm_vfe_stats_buf_ioctl(struct v4l2_subdev *sd,
+	unsigned int cmd,
+	struct msm_cam_media_controller *mctl,
+	void __user *arg)
+{
+	struct msm_vfe_cfg_cmd cfgcmd;
+	int rc = 0;
+	v4l2_set_subdev_hostdata(sd, mctl);
+	switch (cmd) {
+	case MSM_CAM_IOCTL_STATS_REQBUF: {
+		struct msm_stats_reqbuf reqbuf;
+		if (copy_from_user(&reqbuf, arg,
+			sizeof(struct msm_stats_reqbuf))) {
+			ERR_COPY_FROM_USER();
+			return -EFAULT;
+		}
+	cfgcmd.cmd_type = VFE_CMD_STATS_REQBUF;
+	cfgcmd.value = (void *)&reqbuf;
+	cfgcmd.length = sizeof(struct msm_stats_reqbuf);
+	rc = msm_isp_subdev_ioctl(sd, &cfgcmd, (void *)mctl->client);
+	break;
+	}
+	case MSM_CAM_IOCTL_STATS_ENQUEUEBUF: {
+		struct msm_stats_buf_info buf_info;
+		if (copy_from_user(&buf_info, arg,
+			sizeof(struct msm_stats_buf_info))) {
+			ERR_COPY_FROM_USER();
+			return -EFAULT;
+		}
+	cfgcmd.cmd_type = VFE_CMD_STATS_ENQUEUEBUF;
+	cfgcmd.value = (void *)&buf_info;
+	cfgcmd.length = sizeof(struct msm_stats_buf_info);
+	rc = msm_isp_subdev_ioctl(sd, &cfgcmd, NULL);
+	break;
+	}
+	case MSM_CAM_IOCTL_STATS_FLUSH_BUFQ: {
+		struct msm_stats_flush_bufq bufq_info;
+		if (copy_from_user(&bufq_info, arg,
+			sizeof(struct msm_stats_flush_bufq))) {
+			ERR_COPY_FROM_USER();
+			return -EFAULT;
+		}
+	cfgcmd.cmd_type = VFE_CMD_STATS_FLUSH_BUFQ;
+	cfgcmd.value = (void *)&bufq_info;
+	cfgcmd.length = sizeof(struct msm_stats_flush_bufq);
+	rc = msm_isp_subdev_ioctl(sd, &cfgcmd, NULL);
+	break;
+	}
+	case MSM_CAM_IOCTL_STATS_UNREG_BUF: {
+		struct msm_stats_reqbuf reqbuf;
+		if (copy_from_user(&reqbuf, arg,
+			sizeof(struct msm_stats_reqbuf))) {
+			ERR_COPY_FROM_USER();
+			return -EFAULT;
+		}
+	cfgcmd.cmd_type = VFE_CMD_STATS_UNREGBUF;
+	cfgcmd.value = (void *)&reqbuf;
+	cfgcmd.length = sizeof(struct msm_stats_reqbuf);
+	rc = msm_isp_subdev_ioctl(sd, &cfgcmd, (void *)mctl->client);
+	break;
+	}
+	default:
+		rc = -1;
+	break;
+	}
+	CDBG("%s\n", __func__);
+	return rc;
+}
 /* config function simliar to origanl msm_ioctl_config*/
-static int msm_isp_config(struct msm_cam_media_controller *pmctl,
+int msm_isp_config(struct msm_cam_media_controller *pmctl,
 			 unsigned int cmd, unsigned long arg)
 {
 
 	int rc = -EINVAL;
 	void __user *argp = (void __user *)arg;
-	struct v4l2_subdev *sd = &pmctl->isp_sdev->sd;
-
+	struct v4l2_subdev *sd;
+	if (!pmctl->vfe_sdev) {
+		pr_err("%s vfe subdev is NULL\n", __func__);
+		return -ENXIO;
+	}
+	sd = pmctl->vfe_sdev;
 	D("%s: cmd %d\n", __func__, _IOC_NR(cmd));
 	switch (cmd) {
-	case MSM_CAM_IOCTL_PICT_PP_DONE:
-		/* Release the preview of snapshot frame
-		 * that was grabbed.
-		 */
-		/*rc = msm_pp_release(pmsm->sync, arg);*/
-		break;
-
 	case MSM_CAM_IOCTL_CONFIG_VFE:
 		/* Coming from config thread for update */
-		rc = msm_config_vfe(sd, &pmctl->sync, argp);
-		break;
-
-	case MSM_CAM_IOCTL_CONFIG_VPE:
-		/* Coming from config thread for update */
-		/*rc = msm_config_vpe(pmsm->sync, argp);*/
-		rc = 0;
+		rc = msm_config_vfe(sd, pmctl, argp);
 		break;
 
 	case MSM_CAM_IOCTL_AXI_CONFIG:
-	case MSM_CAM_IOCTL_AXI_VPE_CONFIG:
 		D("Received MSM_CAM_IOCTL_AXI_CONFIG\n");
-		rc = msm_axi_config(sd, &pmctl->sync, argp);
-		break;
-
-	case MSM_CAM_IOCTL_SET_CROP:
-		rc = msm_set_crop(&pmctl->sync, argp);
+		rc = msm_axi_config(sd, pmctl, argp);
 		break;
 
 	case MSM_CAM_IOCTL_RELEASE_STATS_BUFFER:
-		rc = msm_put_stats_buffer(sd, &pmctl->sync, argp);
+		rc = msm_put_stats_buffer(sd, pmctl, argp);
+		break;
+
+	case MSM_CAM_IOCTL_STATS_REQBUF:
+	case MSM_CAM_IOCTL_STATS_ENQUEUEBUF:
+	case MSM_CAM_IOCTL_STATS_FLUSH_BUFQ:
+	case MSM_CAM_IOCTL_STATS_UNREG_BUF:
+		rc = msm_vfe_stats_buf_ioctl(sd, cmd, pmctl, argp);
 		break;
 
 	default:
@@ -759,50 +752,7 @@ static int msm_isp_config(struct msm_cam_media_controller *pmctl,
 
 	return rc;
 }
-
-static struct msm_isp_ops isp_subdev[MSM_MAX_CAMERA_CONFIGS];
-
-/**/
-int msm_isp_init_module(int g_num_config_nodes)
-{
-	int i = 0;
-
-	for (i = 0; i < g_num_config_nodes; i++) {
-		isp_subdev[i].isp_open = msm_isp_open;
-		isp_subdev[i].isp_config = msm_isp_config;
-		isp_subdev[i].isp_release  = msm_isp_release;
-		isp_subdev[i].isp_enqueue = msm_isp_enqueue;
-		isp_subdev[i].isp_notify = msm_isp_notify;
-	}
-	return 0;
-}
-EXPORT_SYMBOL(msm_isp_init_module);
-
-/*
-*/
-int msm_isp_register(struct msm_cam_server_dev *psvr)
-{
-	int i = 0;
-
-	D("%s\n", __func__);
-
-	BUG_ON(!psvr);
-
-	/* Initialize notify function for v4l2_dev */
-	for (i = 0; i < psvr->config_info.num_config_nodes; i++)
-		psvr->isp_subdev[i] = &(isp_subdev[i]);
-
-	return 0;
-}
-EXPORT_SYMBOL(msm_isp_register);
-
-/**/
-void msm_isp_unregister(struct msm_cam_server_dev *psvr)
-{
-	int i = 0;
-	for (i = 0; i < psvr->config_info.num_config_nodes; i++)
-		psvr->isp_subdev[i] = NULL;
-}
+EXPORT_SYMBOL(msm_isp_config);
 
 int msm_isp_subdev_ioctl(struct v4l2_subdev *isp_subdev,
 	struct msm_vfe_cfg_cmd *cfgcmd, void *data)

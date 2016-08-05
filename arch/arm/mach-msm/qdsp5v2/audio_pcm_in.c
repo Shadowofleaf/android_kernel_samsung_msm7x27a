@@ -3,7 +3,7 @@
  *
  * Copyright (C) 2008 Google, Inc.
  * Copyright (C) 2008 HTC Corporation
- * Copyright (c) 2009-2011, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2009-2012, The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -33,9 +33,9 @@
 
 #include <mach/iommu.h>
 #include <mach/iommu_domains.h>
-#include <mach/msm_subsystem_map.h>
 
 #include <mach/msm_adsp.h>
+#include <mach/socinfo.h>
 #include <mach/qdsp5v2/qdsp5audreccmdi.h>
 #include <mach/qdsp5v2/qdsp5audrecmsg.h>
 #include <mach/qdsp5v2/audpreproc.h>
@@ -112,7 +112,7 @@ struct audio_in {
 	/* data allocated for various buffers */
 	char *data;
 	dma_addr_t phys;
-	struct msm_mapped_buffer *map_v_read;
+	void *map_v_read;
 
 	int opened;
 	int enabled;
@@ -120,6 +120,7 @@ struct audio_in {
 	int stopped; /* set when stopped, cleared on flush */
 	int abort; /* set when error, like sample rate mismatch */
 	int dual_mic_config;
+	char *build_id;
 };
 
 static struct audio_in the_audio_in;
@@ -370,7 +371,13 @@ static int audpcm_in_enc_config(struct audio_in *audio, int enable)
 	struct audpreproc_audrec_cmd_enc_cfg cmd;
 
 	memset(&cmd, 0, sizeof(cmd));
-	cmd.cmd_id = AUDPREPROC_AUDREC_CMD_ENC_CFG_2;
+	if (audio->build_id[17] == '1') {
+		cmd.cmd_id = AUDPREPROC_AUDREC_CMD_ENC_CFG_2;
+		MM_ERR("sending AUDPREPROC_AUDREC_CMD_ENC_CFG_2 command");
+	} else {
+		cmd.cmd_id = AUDPREPROC_AUDREC_CMD_ENC_CFG;
+		MM_ERR("sending AUDPREPROC_AUDREC_CMD_ENC_CFG command");
+	}
 	cmd.stream_id = audio->enc_id;
 
 	if (enable)
@@ -630,29 +637,49 @@ static long audpcm_in_ioctl(struct file *file,
 			rc = -EFAULT;
 			break;
 		}
-		if (cfg.channel_count == 1) {
-			cfg.channel_count = AUDREC_CMD_MODE_MONO;
-			if ((cfg.buffer_size == MONO_DATA_SIZE_256) ||
-			    (cfg.buffer_size == MONO_DATA_SIZE_512) ||
-			    (cfg.buffer_size == MONO_DATA_SIZE_1024)) {
-				audio->buffer_size = cfg.buffer_size;
+		if (audio->build_id[17] == '1') {
+			audio->enc_type = ENC_TYPE_EXT_WAV | audio->mode;
+			if (cfg.channel_count == 1) {
+				cfg.channel_count = AUDREC_CMD_MODE_MONO;
+				if ((cfg.buffer_size == MONO_DATA_SIZE_256) ||
+					(cfg.buffer_size ==
+						MONO_DATA_SIZE_512) ||
+					(cfg.buffer_size ==
+						MONO_DATA_SIZE_1024)) {
+					audio->buffer_size = cfg.buffer_size;
+				} else {
+					rc = -EINVAL;
+					break;
+				}
+			} else if (cfg.channel_count == 2) {
+				cfg.channel_count = AUDREC_CMD_MODE_STEREO;
+				if ((cfg.buffer_size ==
+						STEREO_DATA_SIZE_256) ||
+					(cfg.buffer_size ==
+						STEREO_DATA_SIZE_512) ||
+					(cfg.buffer_size ==
+						STEREO_DATA_SIZE_1024)) {
+					audio->buffer_size = cfg.buffer_size;
+				} else {
+					rc = -EINVAL;
+					break;
+				}
 			} else {
 				rc = -EINVAL;
 				break;
 			}
-		} else if (cfg.channel_count == 2) {
-			cfg.channel_count = AUDREC_CMD_MODE_STEREO;
-			if ((cfg.buffer_size == STEREO_DATA_SIZE_256) ||
-			    (cfg.buffer_size == STEREO_DATA_SIZE_512) ||
-			    (cfg.buffer_size == STEREO_DATA_SIZE_1024)) {
-				audio->buffer_size = cfg.buffer_size;
-			} else {
-				rc = -EINVAL;
-				break;
+		} else if (audio->build_id[17] == '0') {
+			audio->enc_type = ENC_TYPE_WAV | audio->mode;
+			if (cfg.channel_count == 1) {
+				cfg.channel_count = AUDREC_CMD_MODE_MONO;
+				audio->buffer_size = MONO_DATA_SIZE_1024;
+			} else if (cfg.channel_count == 2) {
+				cfg.channel_count = AUDREC_CMD_MODE_STEREO;
+				audio->buffer_size = STEREO_DATA_SIZE_1024;
 			}
 		} else {
-			rc = -EINVAL;
-			break;
+			MM_ERR("wrong build_id = %s\n", audio->build_id);
+			return -ENODEV;
 		}
 		audio->samp_rate = cfg.sample_rate;
 		audio->channel_mode = cfg.channel_count;
@@ -815,7 +842,7 @@ static int audpcm_in_release(struct inode *inode, struct file *file)
 	audio->audrec = NULL;
 	audio->opened = 0;
 	if (audio->data) {
-		msm_subsystem_unmap_buffer(audio->map_v_read);
+		iounmap(audio->map_v_read);
 		free_contiguous_memory_by_paddr(audio->phys);
 		audio->data = NULL;
 	}
@@ -836,16 +863,14 @@ static int audpcm_in_open(struct inode *inode, struct file *file)
 	}
 	audio->phys = allocate_contiguous_ebi_nomap(DMASZ, SZ_4K);
 	if (audio->phys) {
-		audio->map_v_read = msm_subsystem_map_buffer(
-					audio->phys, DMASZ,
-					MSM_SUBSYSTEM_MAP_KADDR, NULL, 0);
+		audio->map_v_read = ioremap(audio->phys, DMASZ);
 		if (IS_ERR(audio->map_v_read)) {
 			MM_ERR("could not map read phys buffers\n");
 			rc = -ENOMEM;
 			free_contiguous_memory_by_paddr(audio->phys);
 			goto done;
 		}
-		audio->data = audio->map_v_read->vaddr;
+		audio->data = audio->map_v_read;
 	} else {
 		MM_ERR("could not allocate read buffers\n");
 		rc = -ENOMEM;
@@ -910,6 +935,8 @@ static int audpcm_in_open(struct inode *inode, struct file *file)
 	file->private_data = audio;
 	audio->opened = 1;
 	rc = 0;
+	audio->build_id = socinfo_get_build_id();
+	MM_DBG("Modem build id = %s\n", audio->build_id);
 done:
 	mutex_unlock(&audio->lock);
 	return rc;

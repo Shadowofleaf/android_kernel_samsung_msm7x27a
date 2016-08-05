@@ -13,6 +13,7 @@
  */
 
 #include <linux/bitrev.h>
+#include <linux/module.h>
 #include "rc-core-priv.h"
 
 #define NEC_NBITS		32
@@ -49,6 +50,7 @@ static int ir_nec_decode(struct rc_dev *dev, struct ir_raw_event ev)
 	struct nec_dec *data = &dev->raw->nec;
 	u32 scancode;
 	u8 address, not_address, command, not_command;
+	bool send_32bits = false;
 
 	if (!(dev->raw->enabled_protocols & RC_TYPE_NEC))
 		return 0;
@@ -147,6 +149,10 @@ static int ir_nec_decode(struct rc_dev *dev, struct ir_raw_event ev)
 			break;
 
 		data->state = STATE_TRAILER_SPACE;
+
+		if (data->is_nec_x)
+			goto rc_data;
+
 		return 0;
 
 	case STATE_TRAILER_SPACE:
@@ -155,7 +161,7 @@ static int ir_nec_decode(struct rc_dev *dev, struct ir_raw_event ev)
 
 		if (!geq_margin(ev.duration, NEC_TRAILER_SPACE, NEC_UNIT / 2))
 			break;
-
+rc_data:
 		address     = bitrev8((data->bits >> 24) & 0xff);
 		not_address = bitrev8((data->bits >> 16) & 0xff);
 		command	    = bitrev8((data->bits >>  8) & 0xff);
@@ -164,10 +170,15 @@ static int ir_nec_decode(struct rc_dev *dev, struct ir_raw_event ev)
 		if ((command ^ not_command) != 0xff) {
 			IR_dprintk(1, "NEC checksum error: received 0x%08x\n",
 				   data->bits);
-			break;
+			send_32bits = true;
 		}
 
-		if ((address ^ not_address) != 0xff) {
+		if (send_32bits) {
+			/* NEC transport, but modified protocol, used by at
+			 * least Apple and TiVo remotes */
+			scancode = data->bits;
+			IR_dprintk(1, "NEC (modified) scancode 0x%08x\n", scancode);
+		} else if ((address ^ not_address) != 0xff) {
 			/* Extended NEC */
 			scancode = address     << 16 |
 				   not_address <<  8 |
@@ -187,8 +198,8 @@ static int ir_nec_decode(struct rc_dev *dev, struct ir_raw_event ev)
 		return 0;
 	}
 
-	IR_dprintk(1, "NEC decode failed at state %d (%uus %s)\n",
-		   data->state, TO_US(ev.duration), TO_STR(ev.pulse));
+	IR_dprintk(1, "NEC decode failed at count %d state %d (%uus %s)\n",
+		   data->count, data->state, TO_US(ev.duration), TO_STR(ev.pulse));
 	data->state = STATE_INACTIVE;
 	return -EINVAL;
 }

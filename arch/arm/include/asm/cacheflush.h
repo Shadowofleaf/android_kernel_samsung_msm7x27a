@@ -12,129 +12,13 @@
 
 #include <linux/mm.h>
 
-#include <asm/glue.h>
+#include <asm/glue-cache.h>
 #include <asm/shmparam.h>
 #include <asm/cachetype.h>
 #include <asm/outercache.h>
+#include <asm/rodata.h>
 
 #define CACHE_COLOUR(vaddr)	((vaddr & (SHMLBA - 1)) >> PAGE_SHIFT)
-
-/*
- *	Cache Model
- *	===========
- */
-#undef _CACHE
-#undef MULTI_CACHE
-
-#if defined(CONFIG_CPU_CACHE_V3)
-# ifdef _CACHE
-#  define MULTI_CACHE 1
-# else
-#  define _CACHE v3
-# endif
-#endif
-
-#if defined(CONFIG_CPU_CACHE_V4)
-# ifdef _CACHE
-#  define MULTI_CACHE 1
-# else
-#  define _CACHE v4
-# endif
-#endif
-
-#if defined(CONFIG_CPU_ARM920T) || defined(CONFIG_CPU_ARM922T) || \
-    defined(CONFIG_CPU_ARM925T) || defined(CONFIG_CPU_ARM1020) || \
-    defined(CONFIG_CPU_ARM1026)
-# define MULTI_CACHE 1
-#endif
-
-#if defined(CONFIG_CPU_FA526)
-# ifdef _CACHE
-#  define MULTI_CACHE 1
-# else
-#  define _CACHE fa
-# endif
-#endif
-
-#if defined(CONFIG_CPU_ARM926T)
-# ifdef _CACHE
-#  define MULTI_CACHE 1
-# else
-#  define _CACHE arm926
-# endif
-#endif
-
-#if defined(CONFIG_CPU_ARM940T)
-# ifdef _CACHE
-#  define MULTI_CACHE 1
-# else
-#  define _CACHE arm940
-# endif
-#endif
-
-#if defined(CONFIG_CPU_ARM946E)
-# ifdef _CACHE
-#  define MULTI_CACHE 1
-# else
-#  define _CACHE arm946
-# endif
-#endif
-
-#if defined(CONFIG_CPU_CACHE_V4WB)
-# ifdef _CACHE
-#  define MULTI_CACHE 1
-# else
-#  define _CACHE v4wb
-# endif
-#endif
-
-#if defined(CONFIG_CPU_XSCALE)
-# ifdef _CACHE
-#  define MULTI_CACHE 1
-# else
-#  define _CACHE xscale
-# endif
-#endif
-
-#if defined(CONFIG_CPU_XSC3)
-# ifdef _CACHE
-#  define MULTI_CACHE 1
-# else
-#  define _CACHE xsc3
-# endif
-#endif
-
-#if defined(CONFIG_CPU_MOHAWK)
-# ifdef _CACHE
-#  define MULTI_CACHE 1
-# else
-#  define _CACHE mohawk
-# endif
-#endif
-
-#if defined(CONFIG_CPU_FEROCEON)
-# define MULTI_CACHE 1
-#endif
-
-#if defined(CONFIG_CPU_V6)
-//# ifdef _CACHE
-#  define MULTI_CACHE 1
-//# else
-//#  define _CACHE v6
-//# endif
-#endif
-
-#if defined(CONFIG_CPU_V7)
-//# ifdef _CACHE
-#  define MULTI_CACHE 1
-//# else
-//#  define _CACHE v7
-//# endif
-#endif
-
-#if !defined(_CACHE) && !defined(MULTI_CACHE)
-#error Unknown cache maintainence model
-#endif
 
 /*
  * This flag is used to indicate that the page pointed to by a pte is clean
@@ -266,20 +150,12 @@ extern struct cpu_cache_fns cpu_cache;
  * visible to the CPU.
  */
 #define dmac_map_area			cpu_cache.dma_map_area
-#define dmac_unmap_area		cpu_cache.dma_unmap_area
+#define dmac_unmap_area			cpu_cache.dma_unmap_area
 #define dmac_inv_range			cpu_cache.dma_inv_range
 #define dmac_clean_range		cpu_cache.dma_clean_range
 #define dmac_flush_range		cpu_cache.dma_flush_range
 
 #else
-
-#define __cpuc_flush_icache_all		__glue(_CACHE,_flush_icache_all)
-#define __cpuc_flush_kern_all		__glue(_CACHE,_flush_kern_cache_all)
-#define __cpuc_flush_user_all		__glue(_CACHE,_flush_user_cache_all)
-#define __cpuc_flush_user_range		__glue(_CACHE,_flush_user_cache_range)
-#define __cpuc_coherent_kern_range	__glue(_CACHE,_coherent_kern_range)
-#define __cpuc_coherent_user_range	__glue(_CACHE,_coherent_user_range)
-#define __cpuc_flush_dcache_area	__glue(_CACHE,_flush_kern_dcache_area)
 
 extern void __cpuc_flush_icache_all(void);
 extern void __cpuc_flush_kern_all(void);
@@ -295,12 +171,6 @@ extern void __cpuc_flush_dcache_area(void *, size_t);
  * is visible to DMA, or data written by DMA to system memory is
  * visible to the CPU.
  */
-#define dmac_map_area			__glue(_CACHE,_dma_map_area)
-#define dmac_unmap_area		__glue(_CACHE,_dma_unmap_area)
-#define dmac_inv_range			__glue(_CACHE,_dma_inv_range)
-#define dmac_clean_range		__glue(_CACHE,_dma_clean_range)
-#define dmac_flush_range		__glue(_CACHE,_dma_flush_range)
-
 extern void dmac_map_area(const void *, size_t, int);
 extern void dmac_unmap_area(const void *, size_t, int);
 extern void dmac_inv_range(const void *, const void *);
@@ -339,7 +209,8 @@ extern void copy_to_user_page(struct vm_area_struct *, struct page *,
  * Optimized __flush_icache_all for the common cases. Note that UP ARMv7
  * will fall through to use __flush_icache_all_generic.
  */
-#if (defined(CONFIG_CPU_V7) && defined(CONFIG_CPU_V6)) ||		\
+#if (defined(CONFIG_CPU_V7) && \
+     (defined(CONFIG_CPU_V6) || defined(CONFIG_CPU_V6K))) || \
 	defined(CONFIG_SMP_ON_UP)
 #define __flush_icache_preferred	__cpuc_flush_icache_all
 #elif __LINUX_ARM_ARCH__ >= 7 && defined(CONFIG_SMP)
@@ -353,6 +224,7 @@ extern void copy_to_user_page(struct vm_area_struct *, struct page *,
 static inline void __flush_icache_all(void)
 {
 	__flush_icache_preferred();
+	dsb();
 }
 
 #define flush_cache_all()		__cpuc_flush_kern_all()
@@ -366,7 +238,9 @@ static inline void vivt_flush_cache_mm(struct mm_struct *mm)
 static inline void
 vivt_flush_cache_range(struct vm_area_struct *vma, unsigned long start, unsigned long end)
 {
-	if (cpumask_test_cpu(smp_processor_id(), mm_cpumask(vma->vm_mm)))
+	struct mm_struct *mm = vma->vm_mm;
+
+	if (!mm || cpumask_test_cpu(smp_processor_id(), mm_cpumask(mm)))
 		__cpuc_flush_user_range(start & PAGE_MASK, PAGE_ALIGN(end),
 					vma->vm_flags);
 }
@@ -374,7 +248,9 @@ vivt_flush_cache_range(struct vm_area_struct *vma, unsigned long start, unsigned
 static inline void
 vivt_flush_cache_page(struct vm_area_struct *vma, unsigned long user_addr, unsigned long pfn)
 {
-	if (cpumask_test_cpu(smp_processor_id(), mm_cpumask(vma->vm_mm))) {
+	struct mm_struct *mm = vma->vm_mm;
+
+	if (!mm || cpumask_test_cpu(smp_processor_id(), mm_cpumask(mm))) {
 		unsigned long addr = user_addr & PAGE_MASK;
 		__cpuc_flush_user_range(addr, addr + PAGE_SIZE, vma->vm_flags);
 	}
@@ -452,9 +328,7 @@ static inline void flush_anon_page(struct vm_area_struct *vma,
 }
 
 #define ARCH_HAS_FLUSH_KERNEL_DCACHE_PAGE
-static inline void flush_kernel_dcache_page(struct page *page)
-{
-}
+extern void flush_kernel_dcache_page(struct page *);
 
 #define flush_dcache_mmap_lock(mapping) \
 	spin_lock_irq(&(mapping)->tree_lock)

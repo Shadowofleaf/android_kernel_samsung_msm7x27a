@@ -16,6 +16,8 @@
 #include <linux/platform_device.h>
 #include <linux/gpio.h>
 #include <linux/smsc911x.h>
+#include <linux/regulator/machine.h>
+#include <linux/regulator/fixed.h>
 
 #include <mach/hardware.h>
 
@@ -78,7 +80,7 @@ static struct smsc911x_platform_config smsc911x_config = {
 
 static struct platform_device smsc_lan9217_device = {
 	.name = "smsc911x",
-	.id = 0,
+	.id = -1,
 	.dev = {
 		.platform_data = &smsc911x_config,
 	},
@@ -100,14 +102,9 @@ static void mxc_expio_irq_handler(u32 irq, struct irq_desc *desc)
 
 	expio_irq = MXC_BOARD_IRQ_START;
 	for (; int_valid != 0; int_valid >>= 1, expio_irq++) {
-		struct irq_desc *d;
 		if ((int_valid & 1) == 0)
 			continue;
-		d = irq_desc + expio_irq;
-		if (unlikely(!(d->handle_irq)))
-			pr_err("\nEXPIO irq: %d unhandled\n", expio_irq);
-		else
-			d->handle_irq(expio_irq, d);
+		generic_handle_irq(expio_irq);
 	}
 
 	desc->irq_data.chip->irq_ack(&desc->irq_data);
@@ -153,6 +150,11 @@ static struct irq_chip expio_irq_chip = {
 	.irq_unmask = expio_unmask_irq,
 };
 
+static struct regulator_consumer_supply dummy_supplies[] = {
+	REGULATOR_SUPPLY("vdd33a", "smsc911x"),
+	REGULATOR_SUPPLY("vddvario", "smsc911x"),
+};
+
 int __init mxc_expio_init(u32 base, u32 p_irq)
 {
 	int i;
@@ -186,14 +188,15 @@ int __init mxc_expio_init(u32 base, u32 p_irq)
 	__raw_writew(0x1F, brd_io + INTR_MASK_REG);
 	for (i = MXC_EXP_IO_BASE;
 	     i < (MXC_EXP_IO_BASE + MXC_MAX_EXP_IO_LINES); i++) {
-		set_irq_chip(i, &expio_irq_chip);
-		set_irq_handler(i, handle_level_irq);
+		irq_set_chip_and_handler(i, &expio_irq_chip, handle_level_irq);
 		set_irq_flags(i, IRQF_VALID);
 	}
-	set_irq_type(p_irq, IRQF_TRIGGER_LOW);
-	set_irq_chained_handler(p_irq, mxc_expio_irq_handler);
+	irq_set_irq_type(p_irq, IRQF_TRIGGER_LOW);
+	irq_set_chained_handler(p_irq, mxc_expio_irq_handler);
 
 	/* Register Lan device on the debugboard */
+	regulator_register_fixed(0, dummy_supplies, ARRAY_SIZE(dummy_supplies));
+
 	smsc911x_resources[0].start = LAN9217_BASE_ADDR(base);
 	smsc911x_resources[0].end = LAN9217_BASE_ADDR(base) + 0x100 - 1;
 	platform_device_register(&smsc_lan9217_device);

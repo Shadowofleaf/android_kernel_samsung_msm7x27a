@@ -547,6 +547,8 @@ int savage_driver_load(struct drm_device *dev, unsigned long chipset)
 
 	dev_priv->chipset = (enum savage_family)chipset;
 
+	pci_set_master(dev->pdev);
+
 	return 0;
 }
 
@@ -647,9 +649,6 @@ int savage_driver_firstopen(struct drm_device *dev)
 	ret = drm_addmap(dev, aperture_base, SAVAGE_APERTURE_SIZE,
 			 _DRM_FRAME_BUFFER, _DRM_WRITE_COMBINING,
 			 &dev_priv->aperture);
-	if (ret)
-		return ret;
-
 	return ret;
 }
 

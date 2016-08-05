@@ -46,7 +46,7 @@
 #include <net/xfrm.h>
 #include <net/checksum.h>
 #include <net/udp.h>
-#include <asm/atomic.h>
+#include <linux/atomic.h>
 
 #include "avc.h"
 #include "objsec.h"
@@ -112,7 +112,7 @@ int selinux_xfrm_policy_lookup(struct xfrm_sec_ctx *ctx, u32 fl_secid, u8 dir)
  */
 
 int selinux_xfrm_state_pol_flow_match(struct xfrm_state *x, struct xfrm_policy *xp,
-			struct flowi *fl)
+			const struct flowi *fl)
 {
 	u32 state_sid;
 	int rc;
@@ -135,10 +135,10 @@ int selinux_xfrm_state_pol_flow_match(struct xfrm_state *x, struct xfrm_policy *
 
 	state_sid = x->security->ctx_sid;
 
-	if (fl->secid != state_sid)
+	if (fl->flowi_secid != state_sid)
 		return 0;
 
-	rc = avc_has_perm(fl->secid, state_sid, SECCLASS_ASSOCIATION,
+	rc = avc_has_perm(fl->flowi_secid, state_sid, SECCLASS_ASSOCIATION,
 			  ASSOCIATION__SENDTO,
 			  NULL)? 0:1;
 
@@ -152,21 +152,13 @@ int selinux_xfrm_state_pol_flow_match(struct xfrm_state *x, struct xfrm_policy *
 	return rc;
 }
 
-/*
- * LSM hook implementation that checks and/or returns the xfrm sid for the
- * incoming packet.
- */
-
-int selinux_xfrm_decode_session(struct sk_buff *skb, u32 *sid, int ckall)
+static int selinux_xfrm_skb_sid_ingress(struct sk_buff *skb,
+					u32 *sid, int ckall)
 {
-	struct sec_path *sp;
+	struct sec_path *sp = skb->sp;
 
 	*sid = SECSID_NULL;
 
-	if (skb == NULL)
-		return 0;
-
-	sp = skb->sp;
 	if (sp) {
 		int i, sid_set = 0;
 
@@ -190,6 +182,45 @@ int selinux_xfrm_decode_session(struct sk_buff *skb, u32 *sid, int ckall)
 	return 0;
 }
 
+static u32 selinux_xfrm_skb_sid_egress(struct sk_buff *skb)
+{
+	struct dst_entry *dst = skb_dst(skb);
+	struct xfrm_state *x;
+
+	if (dst == NULL)
+		return SECSID_NULL;
+	x = dst->xfrm;
+	if (x == NULL || !selinux_authorizable_xfrm(x))
+		return SECSID_NULL;
+
+	return x->security->ctx_sid;
+}
+
+/*
+ * LSM hook implementation that checks and/or returns the xfrm sid for the
+ * incoming packet.
+ */
+
+int selinux_xfrm_decode_session(struct sk_buff *skb, u32 *sid, int ckall)
+{
+	if (skb == NULL) {
+		*sid = SECSID_NULL;
+		return 0;
+	}
+	return selinux_xfrm_skb_sid_ingress(skb, sid, ckall);
+}
+
+int selinux_xfrm_skb_sid(struct sk_buff *skb, u32 *sid)
+{
+	int rc;
+
+	rc = selinux_xfrm_skb_sid_ingress(skb, sid, 0);
+	if (rc == 0 && *sid == SECSID_NULL)
+		*sid = selinux_xfrm_skb_sid_egress(skb);
+
+	return rc;
+}
+
 /*
  * Security blob allocation for xfrm_policy and xfrm_state
  * CTX does not have a meaningful value on input
@@ -208,7 +239,7 @@ static int selinux_xfrm_sec_ctx_alloc(struct xfrm_sec_ctx **ctxp,
 	if (!uctx)
 		goto not_from_user;
 
-	if (uctx->ctx_doi != XFRM_SC_ALG_SELINUX)
+	if (uctx->ctx_alg != XFRM_SC_ALG_SELINUX)
 		return -EINVAL;
 
 	str_len = uctx->ctx_len;
@@ -310,7 +341,7 @@ int selinux_xfrm_policy_clone(struct xfrm_sec_ctx *old_ctx,
 
 	if (old_ctx) {
 		new_ctx = kmalloc(sizeof(*old_ctx) + old_ctx->ctx_len,
-				  GFP_KERNEL);
+				  GFP_ATOMIC);
 		if (!new_ctx)
 			return -ENOMEM;
 

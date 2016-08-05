@@ -1,18 +1,15 @@
 /* arch/arm/mach-msm/rpc_server_handset.c
  *
- * Copyright (c) 2008-2010, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2008-2010,2012 The Linux Foundation. All rights reserved.
  *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- *
- * See the GNU General Public License for more details.
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, you can find it at http://www.fsf.org.
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 
 #include <linux/slab.h>
@@ -46,7 +43,6 @@
 #define RPC_KEYPAD_NULL_PROC 0
 #define RPC_KEYPAD_PASS_KEY_CODE_PROC 2
 #define RPC_KEYPAD_SET_PWR_KEY_STATE_PROC 3
-
 #define HS_PWR_K				0x6F	/* Power key */
 #define HS_END_K				0x51	/* End key or Power key */
 #define HS_HEADSET_K  			0x7E 	/* 4pole headset */
@@ -56,9 +52,9 @@
 #define HS_HEADSET_SWITCH_3_K	0xF1	/* Volume down key */
 #define HS_HEADSET_HEADPHONE_K	0xF6	/* 3pole headset */
 #define HS_HEADSET_MICROPHONE_K 0xF7
-#define HS_REL_K				0xFF	/* key release */
+#define HS_REL_K		0xFF	/* key release */
 
-#define SW_HEADPHONE_INSERT_W_MIC 1 	/* HS with mic */
+#define SW_HEADPHONE_INSERT_W_MIC 1 /* HS with mic */
 
 #define KEY(hs_key, input_key) ((hs_key << 24) | input_key)
 
@@ -216,6 +212,7 @@ static const uint32_t hs_key_map[] = {
 	KEY(HS_END_K, KEY_POWER),
 #if 0
 	KEY(HS_STEREO_HEADSET_K, SW_HEADPHONE_INSERT_W_MIC),
+	KEY(HS_HEADSET_HEADPHONE_K, SW_HEADPHONE_INSERT),
 	KEY(HS_HEADSET_MICROPHONE_K, SW_MICROPHONE_INSERT),
 	KEY(HS_HEADSET_HEADPHONE_K, SW_HEADPHONE_INSERT), 			/* 3pole headset */
 	KEY(HS_HEADSET_K, SW_HEADPHONE_INSERT_W_MIC), 				/* 4pole headset */	
@@ -337,22 +334,11 @@ static void report_hs_key(uint32_t key_code, uint32_t key_parm)
 	else
 		key = hs_find_key(key_code);
 
-//	printk("[KEY] key_parm: %d, key_code: %d, key: %d\n", key_parm, key_code, key);
 	temp_key_code = key_code;
 
 	if (key_parm == HS_REL_K) {
 		key_code = key_parm;
 	}
-
-	if ((key != KEY_POWER) && !get_msm7x27a_det_jack_state()) {
-		pr_info("%s headset is not connected %d %d\n", __func__, key, (key_code != HS_REL_K));
-		return;	
-	}
-
-#if 0
-	if( key == KEY_END && !get_msm7x27a_det_jack_state() )
-	key = KEY_POWER;
-#endif
 	switch (key) {
 	case KEY_POWER:
 		input_report_key(hs->ipdev, key, (key_code != HS_REL_K));
@@ -650,7 +636,7 @@ static int hs_cb_func(struct msm_rpc_client *client, void *buffer, int in_size)
 	return 0;
 }
 
-static int __init hs_rpc_cb_init(void)
+static int __devinit hs_rpc_cb_init(void)
 {
 	int rc = 0, i, num_vers;
 
@@ -781,6 +767,7 @@ static int __devinit hs_probe(struct platform_device *pdev)
 	//input_set_capability(ipdev, EV_SW, SW_MICROPHONE_INSERT);
 	input_set_capability(ipdev, EV_KEY, KEY_POWER);
 	input_set_capability(ipdev, EV_KEY, KEY_END);
+
 	rc = input_register_device(ipdev);
 	if (rc) {
 		dev_err(&ipdev->dev,

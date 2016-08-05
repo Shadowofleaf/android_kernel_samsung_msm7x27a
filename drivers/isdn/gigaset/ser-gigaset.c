@@ -246,7 +246,7 @@ static int gigaset_write_cmd(struct cardstate *cs, struct cmdbuf_t *cb)
 	unsigned long flags;
 
 	gigaset_dbg_buffer(cs->mstate != MS_LOCKED ?
-				DEBUG_TRANSCMD : DEBUG_LOCKCMD,
+			   DEBUG_TRANSCMD : DEBUG_LOCKCMD,
 			   "CMD Transmit", cb->len, cb->buf);
 
 	spin_lock_irqsave(&cs->cmdlock, flags);
@@ -440,7 +440,7 @@ static int gigaset_set_modem_ctrl(struct cardstate *cs, unsigned old_state,
 	if (!set && !clear)
 		return 0;
 	gig_dbg(DEBUG_IF, "tiocmset set %x clear %x", set, clear);
-	return tty->ops->tiocmset(tty, NULL, set, clear);
+	return tty->ops->tiocmset(tty, set, clear);
 }
 
 static int gigaset_baud_rate(struct cardstate *cs, unsigned cflag)
@@ -773,8 +773,8 @@ static int __init ser_gigaset_init(void)
 
 	/* allocate memory for our driver state and initialize it */
 	driver = gigaset_initdriver(GIGASET_MINOR, GIGASET_MINORS,
-					  GIGASET_MODULENAME, GIGASET_DEVNAME,
-					  &ops, THIS_MODULE);
+				    GIGASET_MODULENAME, GIGASET_DEVNAME,
+				    &ops, THIS_MODULE);
 	if (!driver)
 		goto error;
 

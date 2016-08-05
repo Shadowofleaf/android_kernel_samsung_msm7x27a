@@ -149,6 +149,7 @@ nv50_fifo_init_regs(struct drm_device *dev)
 	nv_wr32(dev, 0x3204, 0);
 	nv_wr32(dev, 0x3210, 0);
 	nv_wr32(dev, 0x3270, 0);
+	nv_wr32(dev, 0x2044, 0x01003fff);
 
 	/* Enable dummy channels setup by nv50_instmem.c */
 	nv50_fifo_channel_enable(dev, 0);
@@ -229,6 +230,7 @@ nv50_fifo_create_context(struct nouveau_channel *chan)
 	struct drm_device *dev = chan->dev;
 	struct drm_nouveau_private *dev_priv = dev->dev_private;
 	struct nouveau_gpuobj *ramfc = NULL;
+        uint64_t ib_offset = chan->pushbuf_base + chan->dma.ib_base * 4;
 	unsigned long flags;
 	int ret;
 
@@ -273,14 +275,15 @@ nv50_fifo_create_context(struct nouveau_channel *chan)
 	nv_wo32(ramfc, 0x80, ((chan->ramht->bits - 9) << 27) |
 			     (4 << 24) /* SEARCH_FULL */ |
 			     (chan->ramht->gpuobj->cinst >> 4));
-	nv_wo32(ramfc, 0x44, 0x2101ffff);
+	nv_wo32(ramfc, 0x44, 0x01003fff);
 	nv_wo32(ramfc, 0x60, 0x7fffffff);
 	nv_wo32(ramfc, 0x40, 0x00000000);
 	nv_wo32(ramfc, 0x7c, 0x30000001);
 	nv_wo32(ramfc, 0x78, 0x00000000);
 	nv_wo32(ramfc, 0x3c, 0x403f6078);
-	nv_wo32(ramfc, 0x50, chan->pushbuf_base + chan->dma.ib_base * 4);
-	nv_wo32(ramfc, 0x54, drm_order(chan->dma.ib_max + 1) << 16);
+	nv_wo32(ramfc, 0x50, lower_32_bits(ib_offset));
+	nv_wo32(ramfc, 0x54, upper_32_bits(ib_offset) |
+                drm_order(chan->dma.ib_max + 1) << 16);
 
 	if (dev_priv->chipset != 0x50) {
 		nv_wo32(chan->ramin, 0, chan->id);

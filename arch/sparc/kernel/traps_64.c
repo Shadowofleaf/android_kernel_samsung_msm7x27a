@@ -22,7 +22,6 @@
 
 #include <asm/smp.h>
 #include <asm/delay.h>
-#include <asm/system.h>
 #include <asm/ptrace.h>
 #include <asm/oplib.h>
 #include <asm/page.h>
@@ -41,6 +40,7 @@
 #include <asm/head.h>
 #include <asm/prom.h>
 #include <asm/memctrl.h>
+#include <asm/cacheflush.h>
 
 #include "entry.h"
 #include "kstack.h"
@@ -1804,7 +1804,7 @@ static const char *sun4v_err_type_to_str(u32 type)
 		return "warning resumable";
 	default:
 		return "unknown";
-	};
+	}
 }
 
 static void sun4v_log_error(struct pt_regs *regs, struct sun4v_error_entry *ent, int cpu, const char *pfx, atomic_t *ocnt)

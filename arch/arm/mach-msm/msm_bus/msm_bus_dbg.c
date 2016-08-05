@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2010-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -10,7 +10,11 @@
  * GNU General Public License for more details.
  *
  */
+
+#define pr_fmt(fmt) "AXI: %s(): " fmt, __func__
+
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/seq_file.h>
 #include <linux/debugfs.h>
 #include <linux/slab.h>
@@ -344,7 +348,7 @@ static int msm_bus_dbg_fill_cl_buffer(const struct msm_bus_scale_pdata *pdata,
 	int i = 0, j;
 	char *buf = NULL;
 	struct msm_bus_cldata *cldata = NULL;
-	ktime_t ts;
+	struct timespec ts;
 
 	list_for_each_entry(cldata, &cl_list, list) {
 		if (cldata->clid == clid)
@@ -366,9 +370,9 @@ static int msm_bus_dbg_fill_cl_buffer(const struct msm_bus_scale_pdata *pdata,
 		cldata->size = 0;
 	}
 	buf = cldata->buffer;
-	ts = ktime_get();
+	ts = ktime_to_timespec(ktime_get());
 	i += scnprintf(buf + i, MAX_BUFF_SIZE - i, "\n%d.%d\n",
-		ts.tv.sec, ts.tv.nsec);
+		(int)ts.tv_sec, (int)ts.tv_nsec);
 	i += scnprintf(buf + i, MAX_BUFF_SIZE - i, "curr   : %d\n", index);
 	i += scnprintf(buf + i, MAX_BUFF_SIZE - i, "masters: ");
 
@@ -381,11 +385,11 @@ static int msm_bus_dbg_fill_cl_buffer(const struct msm_bus_scale_pdata *pdata,
 			pdata->usecase[index].vectors[j].dst);
 	i += scnprintf(buf + i, MAX_BUFF_SIZE - i, "\nab     : ");
 	for (j = 0; j < pdata->usecase->num_paths; j++)
-		i += scnprintf(buf + i, MAX_BUFF_SIZE - i, "%u  ",
+		i += scnprintf(buf + i, MAX_BUFF_SIZE - i, "%llu  ",
 			pdata->usecase[index].vectors[j].ab);
 	i += scnprintf(buf + i, MAX_BUFF_SIZE - i, "\nib     : ");
 	for (j = 0; j < pdata->usecase->num_paths; j++)
-		i += scnprintf(buf + i, MAX_BUFF_SIZE - i, "%u  ",
+		i += scnprintf(buf + i, MAX_BUFF_SIZE - i, "%llu  ",
 			pdata->usecase[index].vectors[j].ib);
 	i += scnprintf(buf + i, MAX_BUFF_SIZE - i, "\n");
 
@@ -522,7 +526,7 @@ static int msm_bus_dbg_fill_fab_buffer(const char *fabname,
 	int i;
 	char *buf = NULL;
 	struct msm_bus_fab_list *fablist = NULL;
-	ktime_t ts;
+	struct timespec ts;
 
 	mutex_lock(&msm_bus_dbg_fablist_lock);
 	list_for_each_entry(fablist, &fabdata_list, list) {
@@ -543,11 +547,11 @@ static int msm_bus_dbg_fill_fab_buffer(const char *fabname,
 	}
 	buf = fablist->buffer;
 	mutex_unlock(&msm_bus_dbg_fablist_lock);
-	ts = ktime_get();
+	ts = ktime_to_timespec(ktime_get());
 	i += scnprintf(buf + i, MAX_BUFF_SIZE - i, "\n%d.%d\n",
-		ts.tv.sec, ts.tv.nsec);
+		(int)ts.tv_sec, (int)ts.tv_nsec);
 
-	msm_bus_rpm_fill_cdata_buffer(&i, buf + i, MAX_BUFF_SIZE, cdata,
+	msm_bus_rpm_fill_cdata_buffer(&i, buf, MAX_BUFF_SIZE, cdata,
 		nmasters, nslaves, ntslaves);
 	i += scnprintf(buf + i, MAX_BUFF_SIZE - i, "\n");
 	mutex_lock(&msm_bus_dbg_fablist_lock);
@@ -690,15 +694,17 @@ late_initcall(msm_bus_debugfs_init);
 
 static void __exit msm_bus_dbg_teardown(void)
 {
-	struct msm_bus_fab_list *fablist = NULL;
-	struct msm_bus_cldata *cldata = NULL;
+	struct msm_bus_fab_list *fablist = NULL, *fablist_temp;
+	struct msm_bus_cldata *cldata = NULL, *cldata_temp;
 
 	debugfs_remove_recursive(dir);
-	list_for_each_entry(cldata, &cl_list, list) {
+	list_for_each_entry_safe(cldata, cldata_temp, &cl_list, list) {
+		list_del(&cldata->list);
 		kfree(cldata);
 	}
 	mutex_lock(&msm_bus_dbg_fablist_lock);
-	list_for_each_entry(fablist, &fabdata_list, list) {
+	list_for_each_entry_safe(fablist, fablist_temp, &fabdata_list, list) {
+		list_del(&fablist->list);
 		kfree(fablist);
 	}
 	mutex_unlock(&msm_bus_dbg_fablist_lock);

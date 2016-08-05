@@ -1,4 +1,4 @@
-/* Copyright (c) 2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -13,9 +13,28 @@
 #define __QDSP6VOICE_H__
 
 #include <mach/qdsp6v2/apr.h>
+#include <linux/msm_ion.h>
 
-#define MAX_VOC_PKT_SIZE 322
-#define SESSION_NAME_LEN 20
+#define MAX_VOC_PKT_SIZE 642
+#define SESSION_NAME_LEN 21
+
+#define VOC_REC_UPLINK		0x00
+#define VOC_REC_DOWNLINK	0x01
+#define VOC_REC_BOTH		0x02
+
+/* Needed for VOIP & VOLTE support */
+/* Due to Q6 memory map issue */
+enum {
+	VOIP_CAL,
+	VOLTE_CAL,
+	NUM_VOICE_CAL_BUFFERS
+};
+
+enum {
+	CVP_CAL,
+	CVS_CAL,
+	NUM_VOICE_CAL_TYPES
+};
 
 struct voice_header {
 	uint32_t id;
@@ -43,14 +62,22 @@ struct voice_dev_route_state {
 	u16 tx_route_flag;
 };
 
+struct voice_rec_route_state {
+	u16 ul_flag;
+	u16 dl_flag;
+};
+
 enum {
 	VOC_INIT = 0,
 	VOC_RUN,
 	VOC_CHANGE,
 	VOC_RELEASE,
+	VOC_STANDBY,
 };
 
 /* Common */
+#define VSS_ICOMMON_CMD_SET_UI_PROPERTY 0x00011103
+/* Set a UI property */
 #define VSS_ICOMMON_CMD_MAP_MEMORY   0x00011025
 #define VSS_ICOMMON_CMD_UNMAP_MEMORY 0x00011026
 /* General shared memory; byte-accessible, 4 kB-aligned. */
@@ -95,6 +122,15 @@ struct vss_unmap_memory_cmd {
 #define VSS_IMVM_CMD_CREATE_PASSIVE_CONTROL_SESSION	0x000110FF
 /**< No payload. Wait for APRV2_IBASIC_RSP_RESULT response. */
 
+#define VSS_IMVM_CMD_SET_POLICY_DUAL_CONTROL	0x00011327
+/*
+ * VSS_IMVM_CMD_SET_POLICY_DUAL_CONTROL
+ * Description: This command is required to let MVM know
+ * who is in control of session.
+ * Payload: Defined by vss_imvm_cmd_set_policy_dual_control_t.
+ * Result: Wait for APRV2_IBASIC_RSP_RESULT response.
+ */
+
 #define VSS_IMVM_CMD_CREATE_FULL_CONTROL_SESSION	0x000110FE
 /* Create a new full control MVM session. */
 
@@ -118,7 +154,14 @@ struct vss_unmap_memory_cmd {
 */
 
 #define VSS_IMVM_CMD_START_VOICE			0x00011190
-/**< No payload. Wait for APRV2_IBASIC_RSP_RESULT response. */
+/*
+ * Start Voice call command.
+ * Wait for APRV2_IBASIC_RSP_RESULT response.
+ * No pay load.
+ */
+
+#define VSS_IMVM_CMD_STANDBY_VOICE	0x00011191
+/* No payload. Wait for APRV2_IBASIC_RSP_RESULT response. */
 
 #define VSS_IMVM_CMD_STOP_VOICE				0x00011192
 /**< No payload. Wait for APRV2_IBASIC_RSP_RESULT response. */
@@ -138,6 +181,17 @@ struct vss_unmap_memory_cmd {
 
 #define VSS_ICOMMON_CMD_SET_VOICE_TIMING		0x000111E0
 /* Set the voice timing parameters. */
+
+#define VSS_IWIDEVOICE_CMD_SET_WIDEVOICE                0x00011243
+/* Enable/disable WideVoice */
+
+enum msm_audio_voc_rate {
+		VOC_0_RATE, /* Blank frame */
+		VOC_8_RATE, /* 1/8 rate    */
+		VOC_4_RATE, /* 1/4 rate    */
+		VOC_2_RATE, /* 1/2 rate    */
+		VOC_1_RATE  /* Full rate   */
+};
 
 struct vss_istream_cmd_set_tty_mode_t {
 	uint32_t mode;
@@ -214,6 +268,19 @@ struct vss_imvm_cmd_create_control_session_t {
 } __packed;
 
 
+struct vss_imvm_cmd_set_policy_dual_control_t {
+	bool enable_flag;
+	/* Set to TRUE to enable modem state machine control */
+} __packed;
+
+struct vss_iwidevoice_cmd_set_widevoice_t {
+	uint32_t enable;
+	/* WideVoice enable/disable; possible values:
+	* - 0 -- WideVoice disabled
+	* - 1 -- WideVoice enabled
+	*/
+} __packed;
+
 struct mvm_attach_vocproc_cmd {
 	struct apr_hdr hdr;
 	struct vss_istream_cmd_attach_vocproc_t mvm_attach_cvp_handle;
@@ -227,6 +294,11 @@ struct mvm_detach_vocproc_cmd {
 struct mvm_create_ctl_session_cmd {
 	struct apr_hdr hdr;
 	struct vss_imvm_cmd_create_control_session_t mvm_session;
+} __packed;
+
+struct mvm_modem_dual_control_session_cmd {
+	struct apr_hdr hdr;
+	struct vss_imvm_cmd_set_policy_dual_control_t voice_ctl;
 } __packed;
 
 struct mvm_set_tty_mode_cmd {
@@ -252,6 +324,11 @@ struct mvm_set_network_cmd {
 struct mvm_set_voice_timing_cmd {
 	struct apr_hdr hdr;
 	struct vss_icommon_cmd_set_voice_timing_t timing;
+} __packed;
+
+struct mvm_set_widevoice_enable_cmd {
+	struct apr_hdr hdr;
+	struct vss_iwidevoice_cmd_set_widevoice_t vss_set_wv;
 } __packed;
 
 /* TO CVS commands */
@@ -296,6 +373,41 @@ struct mvm_set_voice_timing_cmd {
 
 #define VSS_ISTREAM_CMD_SET_ENC_DTX_MODE		0x0001101D
 /* Set encoder DTX mode. */
+
+#define MODULE_ID_VOICE_MODULE_FENS			0x00010EEB
+#define MODULE_ID_VOICE_MODULE_ST			0x00010EE3
+#define VOICE_PARAM_MOD_ENABLE				0x00010E00
+#define MOD_ENABLE_PARAM_LEN				4
+
+#define VSS_ISTREAM_CMD_START_PLAYBACK                  0x00011238
+/* Start in-call music delivery on the Tx voice path. */
+
+#define VSS_ISTREAM_CMD_STOP_PLAYBACK                   0x00011239
+/* Stop the in-call music delivery on the Tx voice path. */
+
+#define VSS_ISTREAM_CMD_START_RECORD                    0x00011236
+/* Start in-call conversation recording. */
+#define VSS_ISTREAM_CMD_STOP_RECORD                     0x00011237
+/* Stop in-call conversation recording. */
+
+#define VSS_TAP_POINT_NONE                              0x00010F78
+/* Indicates no tapping for specified path. */
+
+#define VSS_TAP_POINT_STREAM_END                        0x00010F79
+/* Indicates that specified path should be tapped at the end of the stream. */
+
+struct vss_istream_cmd_start_record_t {
+	uint32_t rx_tap_point;
+	/* Tap point to use on the Rx path. Supported values are:
+	 * VSS_TAP_POINT_NONE : Do not record Rx path.
+	 * VSS_TAP_POINT_STREAM_END : Rx tap point is at the end of the stream.
+	 */
+	uint32_t tx_tap_point;
+	/* Tap point to use on the Tx path. Supported values are:
+	 * VSS_TAP_POINT_NONE : Do not record tx path.
+	 * VSS_TAP_POINT_STREAM_END : Tx tap point is at the end of the stream.
+	 */
+} __packed;
 
 struct vss_istream_cmd_create_passive_control_session_t {
 	char name[SESSION_NAME_LEN];
@@ -441,6 +553,20 @@ struct vss_istream_cmd_register_calibration_data_t {
 	/* Size of the calibration data in bytes. */
 };
 
+struct vss_icommon_cmd_set_ui_property_enable_t {
+	uint32_t module_id;
+	/* Unique ID of the module. */
+	uint32_t param_id;
+	/* Unique ID of the parameter. */
+	uint16_t param_size;
+	/* Size of the parameter in bytes: MOD_ENABLE_PARAM_LEN */
+	uint16_t reserved;
+	/* Reserved; set to 0. */
+	uint16_t enable;
+	uint16_t reserved_field;
+	/* Reserved, set to 0. */
+};
+
 struct cvs_create_passive_ctl_session_cmd {
 	struct apr_hdr hdr;
 	struct vss_istream_cmd_create_passive_control_session_t cvs_session;
@@ -449,7 +575,7 @@ struct cvs_create_passive_ctl_session_cmd {
 struct cvs_create_full_ctl_session_cmd {
 	struct apr_hdr hdr;
 	struct vss_istream_cmd_create_full_control_session_t cvs_session;
-};
+} __packed;
 
 struct cvs_destroy_session_cmd {
 	struct apr_hdr hdr;
@@ -499,6 +625,15 @@ struct cvs_deregister_cal_data_cmd {
 	struct apr_hdr hdr;
 } __packed;
 
+struct cvs_set_pp_enable_cmd {
+	struct apr_hdr hdr;
+	struct vss_icommon_cmd_set_ui_property_enable_t vss_set_pp;
+} __packed;
+struct cvs_start_record_cmd {
+	struct apr_hdr hdr;
+	struct vss_istream_cmd_start_record_t rec_mode;
+} __packed;
+
 /* TO CVP commands */
 
 #define VSS_IVOCPROC_CMD_CREATE_FULL_CONTROL_SESSION	0x000100C3
@@ -507,6 +642,8 @@ struct cvs_deregister_cal_data_cmd {
 #define APRV2_IBASIC_CMD_DESTROY_SESSION		0x0001003C
 
 #define VSS_IVOCPROC_CMD_SET_DEVICE			0x000100C4
+
+#define VSS_IVOCPROC_CMD_SET_DEVICE_V2			0x000112C6
 
 #define VSS_IVOCPROC_CMD_SET_VP3_DATA			0x000110EB
 
@@ -552,10 +689,19 @@ struct cvs_deregister_cal_data_cmd {
 /* G.711 mu-law (contains two 10ms vocoder frames). */
 #define VSS_MEDIA_ID_G729		0x00010FD0
 /* G.729AB (contains two 10ms vocoder frames. */
+#define VSS_MEDIA_ID_4GV_NB_MODEM	0x00010FC3
+/*CDMA EVRC-B vocoder modem format */
+#define VSS_MEDIA_ID_4GV_WB_MODEM	0x00010FC4
+/*CDMA EVRC-WB vocoder modem format */
+
+#define VSS_IVOCPROC_CMD_SET_MUTE			0x000110EF
 
 #define VOICE_CMD_SET_PARAM				0x00011006
 #define VOICE_CMD_GET_PARAM				0x00011007
 #define VOICE_EVT_GET_PARAM_ACK				0x00011008
+
+/* Default AFE port ID. Applicable to Tx and Rx. */
+#define VSS_IVOCPROC_PORT_ID_NONE			0xFFFF
 
 struct vss_ivocproc_cmd_create_full_control_session_t {
 	uint16_t direction;
@@ -626,6 +772,32 @@ struct vss_ivocproc_cmd_set_device_t {
 	*/
 } __packed;
 
+/* Internal EC */
+#define VSS_IVOCPROC_VOCPROC_MODE_EC_INT_MIXING 0x00010F7C
+
+/* External EC */
+#define VSS_IVOCPROC_VOCPROC_MODE_EC_EXT_MIXING 0x00010F7D
+
+struct vss_ivocproc_cmd_set_device_v2_t {
+	uint16_t tx_port_id;
+	/* Tx device port ID to which the vocproc connects. */
+	uint32_t tx_topology_id;
+	/* Tx path topology ID. */
+	uint16_t rx_port_id;
+	/* Rx device port ID to which the vocproc connects. */
+	uint32_t rx_topology_id;
+	/* Rx path topology ID. */
+	uint32_t vocproc_mode;
+	/* Vocproc mode. The supported values:
+	 * VSS_IVOCPROC_VOCPROC_MODE_EC_INT_MIXING - 0x00010F7C
+	 * VSS_IVOCPROC_VOCPROC_MODE_EC_EXT_MIXING - 0x00010F7D
+	 */
+	uint16_t ec_ref_port_id;
+	/* Port ID to which the vocproc connects for receiving
+	 * echo cancellation reference signal.
+	 */
+} __packed;
+
 struct vss_ivocproc_cmd_register_calibration_data_t {
 	uint32_t phys_addr;
 	/* Phsical address to be registered with vocproc. Calibration data
@@ -645,6 +817,22 @@ struct vss_ivocproc_cmd_register_volume_cal_table_t {
 	/* Size of the volume calibration table in bytes. */
 } __packed;
 
+struct vss_ivocproc_cmd_set_mute_t {
+	uint16_t direction;
+	/*
+	* 0 : TX only.
+	* 1 : RX only.
+	* 2 : TX and Rx.
+	*/
+	uint16_t mute_flag;
+	/*
+	* Mute, un-mute.
+	*
+	* 0 : Disable.
+	* 1 : Enable.
+	*/
+} __packed;
+
 struct cvp_create_full_ctl_session_cmd {
 	struct apr_hdr hdr;
 	struct vss_ivocproc_cmd_create_full_control_session_t cvp_session;
@@ -657,6 +845,11 @@ struct cvp_command {
 struct cvp_set_device_cmd {
 	struct apr_hdr hdr;
 	struct vss_ivocproc_cmd_set_device_t cvp_set_device;
+} __packed;
+
+struct cvp_set_device_cmd_v2 {
+	struct apr_hdr hdr;
+	struct vss_ivocproc_cmd_set_device_v2_t cvp_set_device_v2;
 } __packed;
 
 struct cvp_set_vp3_data_cmd {
@@ -686,6 +879,11 @@ struct cvp_deregister_vol_cal_table_cmd {
 	struct apr_hdr hdr;
 } __packed;
 
+struct cvp_set_mute_cmd {
+	struct apr_hdr hdr;
+	struct vss_ivocproc_cmd_set_mute_t cvp_set_mute;
+} __packed;
+
 /* CB for up-link packets. */
 typedef void (*ul_cb_fn)(uint8_t *voc_pkt,
 			 uint32_t pkt_len,
@@ -701,40 +899,90 @@ struct mvs_driver_info {
 	uint32_t media_type;
 	uint32_t rate;
 	uint32_t network_type;
+	uint32_t dtx_mode;
 	ul_cb_fn ul_cb;
 	dl_cb_fn dl_cb;
 	void *private_data;
 };
 
 struct incall_rec_info {
-	uint32_t pending;
+	uint32_t rec_enable;
 	uint32_t rec_mode;
+	uint32_t recording;
 };
 
 struct incall_music_info {
-	uint32_t pending;
+	uint32_t play_enable;
 	uint32_t playing;
+	int count;
+	int force;
 };
 
 struct voice_data {
 	int voc_state;/*INIT, CHANGE, RELEASE, RUN */
-	uint32_t voc_path;
 
 	wait_queue_head_t mvm_wait;
 	wait_queue_head_t cvs_wait;
 	wait_queue_head_t cvp_wait;
 
-	uint32_t device_events;
-
 	/* cache the values related to Rx and Tx */
 	struct device_data dev_rx;
 	struct device_data dev_tx;
 
+	u32 mvm_state;
+	u32 cvs_state;
+	u32 cvp_state;
+
+	/* Handle to MVM in the Q6 */
+	u16 mvm_handle;
+	/* Handle to CVS in the Q6 */
+	u16 cvs_handle;
+	/* Handle to CVP in the Q6 */
+	u16 cvp_handle;
+
+	struct mutex lock;
+
+	uint16_t sidetone_gain;
+	uint8_t tty_mode;
+	/* widevoice enable value */
+	uint8_t wv_enable;
+	/* slowtalk enable value */
+	uint32_t st_enable;
+	/* FENC enable value */
+	uint32_t fens_enable;
+
+	struct voice_dev_route_state voc_route_state;
+
+	u16 session_id;
+
+	struct incall_rec_info rec_info;
+
+	struct incall_music_info music_info;
+
+	struct voice_rec_route_state rec_route_state;
+};
+
+struct cal_mem {
+	/* Physical Address */
+	uint32_t paddr;
+	/* Kernel Virtual Address */
+	uint32_t kvaddr;
+};
+
+struct cal_data {
+	struct cal_mem	cal_data[NUM_VOICE_CAL_TYPES];
+};
+
+#define MAX_VOC_SESSIONS 4
+#define SESSION_ID_BASE 0xFFF0
+
+struct common_data {
 	/* these default values are for all devices */
 	uint32_t default_mute_val;
 	uint32_t default_vol_val;
 	uint32_t default_sample_val;
-	uint8_t tty_mode;
+	bool ec_ref_ext;
+	uint16_t ec_port_id;
 
 	/* APR to MVM in the Q6 */
 	void *apr_q6_mvm;
@@ -743,30 +991,16 @@ struct voice_data {
 	/* APR to CVP in the Q6 */
 	void *apr_q6_cvp;
 
-	u32 mvm_state;
-	u32 cvs_state;
-	u32 cvp_state;
+	struct ion_client *ion_client;
+	struct ion_handle *ion_handle;
+	struct cal_data voice_cal[NUM_VOICE_CAL_BUFFERS];
 
-	/* Handle to MVM in the Q6 */
-	u16 mvm_passive_handle;  /* for cs call */
-	u16 mvm_full_handle;     /* for voip */
-	/* Handle to CVS in the Q6 */
-	u16 cvs_passive_handle;
-	u16 cvs_full_handle;
-	/* Handle to CVP in the Q6 */
-	u16 cvp_passive_handle;
-	u16 cvp_full_handle;
-
-	struct mutex lock;
+	struct mutex common_lock;
 
 	struct mvs_driver_info mvs_info;
 
-	uint16_t sidetone_gain;
-
-	struct voice_dev_route_state voc_route_state;
+	struct voice_data voice[MAX_VOC_SESSIONS];
 };
-
-int voc_set_voc_path_full(uint32_t set);
 
 void voc_register_mvs_cb(ul_cb_fn ul_cb,
 			dl_cb_fn dl_cb,
@@ -774,7 +1008,8 @@ void voc_register_mvs_cb(ul_cb_fn ul_cb,
 
 void voc_config_vocoder(uint32_t media_type,
 			uint32_t rate,
-			uint32_t network_type);
+			uint32_t network_type,
+			uint32_t dtx_mode);
 
 enum {
 	DEV_RX = 0,
@@ -787,16 +1022,42 @@ enum {
 };
 
 /* called  by alsa driver */
-uint8_t voc_get_tty_mode(void);
-int voc_set_tty_mode(uint8_t tty_mode);
-int voc_start_voice_call(void);
-int voc_end_voice_call(void);
-void voc_set_rxtx_port(uint32_t dev_port_id, uint32_t dev_type);
-int voc_set_rx_vol_index(uint32_t dir, uint32_t voc_idx);
-int voc_set_tx_mute(uint32_t dir, uint32_t mute);
-int voc_disable_cvp(void);
-int voc_enable_cvp(void);
-void voc_set_route_flag(uint8_t path_dir, uint8_t set);
-uint8_t voc_get_route_flag(uint8_t path_dir);
+int voc_set_pp_enable(uint16_t session_id, uint32_t module_id, uint32_t enable);
+int voc_get_pp_enable(uint16_t session_id, uint32_t module_id);
+int voc_set_widevoice_enable(uint16_t session_id, uint32_t wv_enable);
+uint32_t voc_get_widevoice_enable(uint16_t session_id);
+uint8_t voc_get_tty_mode(uint16_t session_id);
+int voc_set_tty_mode(uint16_t session_id, uint8_t tty_mode);
+int voc_start_voice_call(uint16_t session_id);
+int voc_standby_voice_call(uint16_t session_id);
+int voc_resume_voice_call(uint16_t session_id);
+int voc_end_voice_call(uint16_t session_id);
+int voc_set_rxtx_port(uint16_t session_id,
+		      uint32_t dev_port_id,
+		      uint32_t dev_type);
+int voc_set_rx_vol_index(uint16_t session_id, uint32_t dir, uint32_t voc_idx);
+int voc_set_tx_mute(uint16_t session_id, uint32_t dir, uint32_t mute);
+int voc_set_rx_device_mute(uint16_t session_id, uint32_t mute);
+int voc_get_rx_device_mute(uint16_t session_id);
+int voc_disable_cvp(uint16_t session_id);
+int voc_enable_cvp(uint16_t session_id);
+int voc_set_route_flag(uint16_t session_id, uint8_t path_dir, uint8_t set);
+uint8_t voc_get_route_flag(uint16_t session_id, uint8_t path_dir);
+
+#define VOICE_SESSION_NAME "Voice session"
+#define VOIP_SESSION_NAME "VoIP session"
+#define VOLTE_SESSION_NAME "VoLTE session"
+#define VOICE2_SESSION_NAME "Voice2 session"
+
+#define VOC_PATH_PASSIVE 0
+#define VOC_PATH_FULL 1
+#define VOC_PATH_VOLTE_PASSIVE 2
+#define VOC_PATH_VOICE2_PASSIVE 3
+
+uint16_t voc_get_session_id(char *name);
+
+int voc_start_playback(uint32_t set);
+int voc_start_record(uint32_t port_id, uint32_t set);
+int voc_set_ext_ec_ref(uint16_t port_id, bool state);
 
 #endif

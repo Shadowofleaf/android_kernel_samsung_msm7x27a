@@ -74,11 +74,13 @@
 
 /**
  * struct tc_keypad - data structure used by keypad driver
+ * @tc3589x:    pointer to tc35893
  * @input:      pointer to input device object
  * @board:      keypad platform device
  * @krow:	number of rows
  * @kcol:	number of coloumns
  * @keymap:     matrix scan code table for keycodes
+ * @keypad_stopped: holds keypad status
  */
 struct tc_keypad {
 	struct tc3589x *tc3589x;
@@ -90,7 +92,7 @@ struct tc_keypad {
 	bool keypad_stopped;
 };
 
-static int __devinit tc3589x_keypad_init_key_hardware(struct tc_keypad *keypad)
+static int tc3589x_keypad_init_key_hardware(struct tc_keypad *keypad)
 {
 	int ret;
 	struct tc3589x *tc3589x = keypad->tc3589x;
@@ -402,7 +404,7 @@ static int __devexit tc3589x_keypad_remove(struct platform_device *pdev)
 	return 0;
 }
 
-#ifdef CONFIG_PM
+#ifdef CONFIG_PM_SLEEP
 static int tc3589x_keypad_suspend(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
@@ -439,32 +441,21 @@ static int tc3589x_keypad_resume(struct device *dev)
 
 	return 0;
 }
-
-static const SIMPLE_DEV_PM_OPS(tc3589x_keypad_dev_pm_ops,
-			       tc3589x_keypad_suspend, tc3589x_keypad_resume);
 #endif
+
+static SIMPLE_DEV_PM_OPS(tc3589x_keypad_dev_pm_ops,
+			 tc3589x_keypad_suspend, tc3589x_keypad_resume);
 
 static struct platform_driver tc3589x_keypad_driver = {
-	.driver.name  = "tc3589x-keypad",
-	.driver.owner = THIS_MODULE,
-#ifdef CONFIG_PM
-	.driver.pm = &tc3589x_keypad_dev_pm_ops,
-#endif
-	.probe = tc3589x_keypad_probe,
-	.remove = __devexit_p(tc3589x_keypad_remove),
+	.driver	= {
+		.name	= "tc3589x-keypad",
+		.owner	= THIS_MODULE,
+		.pm	= &tc3589x_keypad_dev_pm_ops,
+	},
+	.probe	= tc3589x_keypad_probe,
+	.remove	= __devexit_p(tc3589x_keypad_remove),
 };
-
-static int __init tc3589x_keypad_init(void)
-{
-	return platform_driver_register(&tc3589x_keypad_driver);
-}
-module_init(tc3589x_keypad_init);
-
-static void __exit tc3589x_keypad_exit(void)
-{
-	return platform_driver_unregister(&tc3589x_keypad_driver);
-}
-module_exit(tc3589x_keypad_exit);
+module_platform_driver(tc3589x_keypad_driver);
 
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Jayeeta Banerjee/Sundar Iyer");

@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2010-2012, The Linux Foundation. All rights reserved.
  *
  * sbc/pcm audio input driver
  * Based on the pcm input driver in arch/arm/mach-msm/qdsp5v2/audio_pcm_in.c
@@ -41,7 +41,7 @@
 #include <mach/iommu_domains.h>
 #include <mach/msm_adsp.h>
 #include <mach/msm_memtypes.h>
-#include <mach/msm_subsystem_map.h>
+#include <mach/socinfo.h>
 #include <mach/qdsp5v2/qdsp5audreccmdi.h>
 #include <mach/qdsp5v2/qdsp5audrecmsg.h>
 #include <mach/qdsp5v2/audpreproc.h>
@@ -107,13 +107,14 @@ struct audio_a2dp_in {
 	/* data allocated for various buffers */
 	char *data;
 	dma_addr_t phys;
-	struct msm_mapped_buffer *msm_map;
+	void *msm_map;
 
 	int opened;
 	int enabled;
 	int running;
 	int stopped; /* set when stopped, cleared on flush */
 	int abort; /* set when error, like sample rate mismatch */
+	char *build_id;
 };
 
 static struct audio_a2dp_in the_audio_a2dp_in;
@@ -368,7 +369,11 @@ static int auda2dp_in_enc_config(struct audio_a2dp_in *audio, int enable)
 	struct audpreproc_audrec_cmd_enc_cfg cmd;
 
 	memset(&cmd, 0, sizeof(cmd));
-	cmd.cmd_id = AUDPREPROC_AUDREC_CMD_ENC_CFG_2;
+	if (audio->build_id[17] == '1') {
+		cmd.cmd_id = AUDPREPROC_AUDREC_CMD_ENC_CFG_2;
+	} else {
+		cmd.cmd_id = AUDPREPROC_AUDREC_CMD_ENC_CFG;
+	}
 	cmd.stream_id = audio->enc_id;
 
 	if (enable)
@@ -843,7 +848,7 @@ static int auda2dp_in_release(struct inode *inode, struct file *file)
 	audio->audrec = NULL;
 	audio->opened = 0;
 	if (audio->data) {
-		msm_subsystem_unmap_buffer(audio->msm_map);
+		iounmap(audio->msm_map);
 		free_contiguous_memory_by_paddr(audio->phys);
 		audio->data = NULL;
 	}
@@ -865,9 +870,7 @@ static int auda2dp_in_open(struct inode *inode, struct file *file)
 
 	audio->phys = allocate_contiguous_ebi_nomap(DMASZ, SZ_4K);
 	if (audio->phys) {
-		audio->msm_map = msm_subsystem_map_buffer(
-					audio->phys, DMASZ,
-					MSM_SUBSYSTEM_MAP_KADDR, NULL, 0);
+		audio->msm_map = ioremap(audio->phys, DMASZ);
 		if (IS_ERR(audio->msm_map)) {
 			MM_ERR("could not map the phys address to kernel"
 							"space\n");
@@ -875,7 +878,7 @@ static int auda2dp_in_open(struct inode *inode, struct file *file)
 			free_contiguous_memory_by_paddr(audio->phys);
 			goto done;
 		}
-		audio->data = (u8 *)audio->msm_map->vaddr;
+		audio->data = (u8 *)audio->msm_map;
 	} else {
 		MM_ERR("could not allocate DMA buffers\n");
 		rc = -ENOMEM;
@@ -941,6 +944,8 @@ static int auda2dp_in_open(struct inode *inode, struct file *file)
 		MM_ERR("failed to register device event listener\n");
 		goto evt_error;
 	}
+	audio->build_id = socinfo_get_build_id();
+	MM_DBG("Modem build id = %s\n", audio->build_id);
 	file->private_data = audio;
 	audio->opened = 1;
 	rc = 0;

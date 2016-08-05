@@ -95,7 +95,7 @@ my %VCS_cmds_git = (
     "execute_cmd" => \&git_execute_cmd,
     "available" => '(which("git") ne "") && (-d ".git")',
     "find_signers_cmd" =>
-	"git log --no-color --since=\$email_git_since " .
+	"git log --no-color --follow --since=\$email_git_since " .
 	    '--format="GitCommit: %H%n' .
 		      'GitAuthor: %an <%ae>%n' .
 		      'GitDate: %aD%n' .
@@ -328,7 +328,8 @@ sub read_mailmap {
 	# name1 <mail1> <mail2>
 	# name1 <mail1> name2 <mail2>
 	# (see man git-shortlog)
-	if (/^(.+)<(.+)>$/) {
+
+	if (/^([^<]+)<([^>]+)>$/) {
 	    my $real_name = $1;
 	    my $address = $2;
 
@@ -336,13 +337,13 @@ sub read_mailmap {
 	    ($real_name, $address) = parse_email("$real_name <$address>");
 	    $mailmap->{names}->{$address} = $real_name;
 
-	} elsif (/^<([^\s]+)>\s*<([^\s]+)>$/) {
+	} elsif (/^<([^>]+)>\s*<([^>]+)>$/) {
 	    my $real_address = $1;
 	    my $wrong_address = $2;
 
 	    $mailmap->{addresses}->{$wrong_address} = $real_address;
 
-	} elsif (/^(.+)<([^\s]+)>\s*<([^\s]+)>$/) {
+	} elsif (/^(.+)<([^>]+)>\s*<([^>]+)>$/) {
 	    my $real_name = $1;
 	    my $real_address = $2;
 	    my $wrong_address = $3;
@@ -353,7 +354,7 @@ sub read_mailmap {
 	    $mailmap->{names}->{$wrong_address} = $real_name;
 	    $mailmap->{addresses}->{$wrong_address} = $real_address;
 
-	} elsif (/^(.+)<([^\s]+)>\s*([^\s].*)<([^\s]+)>$/) {
+	} elsif (/^(.+)<([^>]+)>\s*(.+)\s*<([^>]+)>$/) {
 	    my $real_name = $1;
 	    my $real_address = $2;
 	    my $wrong_name = $3;
@@ -420,6 +421,14 @@ foreach my $file (@ARGV) {
 
 	open(my $patch, "< $file")
 	    or die "$P: Can't open $file: $!\n";
+
+	# We can check arbitrary information before the patch
+	# like the commit message, mail headers, etc...
+	# This allows us to match arbitrary keywords against any part
+	# of a git format-patch generated file (subject tags, etc...)
+
+	my $patch_prefix = "";			#Parsing the intro
+
 	while (<$patch>) {
 	    my $patch_line = $_;
 	    if (m/^\+\+\+\s+(\S+)/) {
@@ -428,13 +437,14 @@ foreach my $file (@ARGV) {
 		$filename =~ s@\n@@;
 		$lastfile = $filename;
 		push(@files, $filename);
+		$patch_prefix = "^[+-].*";	#Now parsing the actual patch
 	    } elsif (m/^\@\@ -(\d+),(\d+)/) {
 		if ($email_git_blame) {
 		    push(@range, "$lastfile:$1:$2");
 		}
 	    } elsif ($keywords) {
 		foreach my $line (keys %keyword_hash) {
-		    if ($patch_line =~ m/^[+-].*$keyword_hash{$line}/x) {
+		    if ($patch_line =~ m/${patch_prefix}$keyword_hash{$line}/x) {
 			push(@keyword_tvi, $line);
 		    }
 		}
@@ -921,7 +931,7 @@ sub get_maintainer_role {
     my $start = find_starting_index($index);
     my $end = find_ending_index($index);
 
-    my $role;
+    my $role = "unknown";
     my $subsystem = $typevalue[$start];
     if (length($subsystem) > 20) {
 	$subsystem = substr($subsystem, 0, 17);
@@ -1017,8 +1027,13 @@ sub add_categories {
 		    if ($email_list) {
 			if (!$hash_list_to{lc($list_address)}) {
 			    $hash_list_to{lc($list_address)} = 1;
-			    push(@list_to, [$list_address,
-					    "open list${list_role}"]);
+			    if ($list_additional =~ m/moderated/) {
+				push(@list_to, [$list_address,
+						"moderated list${list_role}"]);
+			    } else {
+				push(@list_to, [$list_address,
+						"open list${list_role}"]);
+			    }
 			}
 		    }
 		}
@@ -1379,7 +1394,7 @@ sub vcs_exists {
 	warn("$P: No supported VCS found.  Add --nogit to options?\n");
 	warn("Using a git repository produces better results.\n");
 	warn("Try Linus Torvalds' latest git repository using:\n");
-	warn("git clone git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux-2.6.git\n");
+	warn("git clone git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git\n");
 	$printed_novcs = 1;
     }
     return 0;

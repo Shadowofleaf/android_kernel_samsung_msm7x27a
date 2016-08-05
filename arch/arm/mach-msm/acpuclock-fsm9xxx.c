@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2010-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -11,8 +11,10 @@
  *
  */
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/init.h>
 #include <linux/io.h>
+#include <linux/platform_device.h>
 #include <mach/board.h>
 
 #include "acpuclock.h"
@@ -20,7 +22,7 @@
 /* Registers */
 #define PLL1_CTL_ADDR		(MSM_CLK_CTL_BASE + 0x604)
 
-unsigned long acpuclk_get_rate(int cpu)
+static unsigned long acpuclk_9xxx_get_rate(int cpu)
 {
 	unsigned int pll1_ctl;
 	unsigned int pll1_l, pll1_div2;
@@ -36,7 +38,26 @@ unsigned long acpuclk_get_rate(int cpu)
 	return pll1_khz;
 }
 
-void __init msm_acpu_clock_init(struct msm_acpu_clock_platform_data *clkdata)
+static struct acpuclk_data acpuclk_9xxx_data = {
+	.get_rate = acpuclk_9xxx_get_rate,
+};
+
+static int __init acpuclk_9xxx_probe(struct platform_device *pdev)
 {
+	acpuclk_register(&acpuclk_9xxx_data);
 	pr_info("ACPU running at %lu KHz\n", acpuclk_get_rate(0));
+	return 0;
 }
+
+static struct platform_driver acpuclk_9xxx_driver = {
+	.driver = {
+		.name = "acpuclk-9xxx",
+		.owner = THIS_MODULE,
+	},
+};
+
+static int __init acpuclk_9xxx_init(void)
+{
+	return platform_driver_probe(&acpuclk_9xxx_driver, acpuclk_9xxx_probe);
+}
+device_initcall(acpuclk_9xxx_init);

@@ -10,6 +10,8 @@
  *
  */
 
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/capability.h>
 #include <linux/module.h>
 #include <linux/types.h>
@@ -46,7 +48,7 @@
 #include <net/rtnetlink.h>
 #include <net/gre.h>
 
-#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+#if IS_ENABLED(CONFIG_IPV6)
 #include <net/ipv6.h>
 #include <net/ip6_fib.h>
 #include <net/ip6_route.h>
@@ -65,7 +67,7 @@
    it is infeasible task. The most general solutions would be
    to keep skb->encapsulation counter (sort of local ttl),
    and silently drop packet when it expires. It is a good
-   solution, but it supposes maintaing new variable in ALL
+   solution, but it supposes maintaining new variable in ALL
    skb, even if no tunneling is used.
 
    Current solution: xmit_recursion breaks dead loops. This is a percpu
@@ -91,14 +93,14 @@
 
    One of them is to parse packet trying to detect inner encapsulation
    made by our node. It is difficult or even impossible, especially,
-   taking into account fragmentation. TO be short, tt is not solution at all.
+   taking into account fragmentation. TO be short, ttl is not solution at all.
 
    Current solution: The solution was UNEXPECTEDLY SIMPLE.
    We force DF flag on tunnels with preconfigured hop limit,
    that is ALL. :-) Well, it does not remove the problem completely,
    but exponential growth of network traffic is changed to linear
    (branches, that exceed pmtu are pruned) and tunnel mtu
-   fastly degrades to value <68, where looping stops.
+   rapidly degrades to value <68, where looping stops.
    Yes, it is not good if there exists a router in the loop,
    which does not force DF, even when encapsulating packets have DF set.
    But it is not our problem! Nobody could accuse us, we made
@@ -171,7 +173,7 @@ struct pcpu_tstats {
 	unsigned long	rx_bytes;
 	unsigned long	tx_packets;
 	unsigned long	tx_bytes;
-};
+} __attribute__((aligned(4*sizeof(unsigned long))));
 
 static struct net_device_stats *ipgre_get_stats(struct net_device *dev)
 {
@@ -413,11 +415,6 @@ static struct ip_tunnel *ipgre_tunnel_locate(struct net *net,
 
 	dev_net_set(dev, net);
 
-	if (strchr(name, '%')) {
-		if (dev_alloc_name(dev, name) < 0)
-			goto failed_free;
-	}
-
 	nt = netdev_priv(dev);
 	nt->parms = *parms;
 	dev->rtnl_link_ops = &ipgre_link_ops;
@@ -426,6 +423,10 @@ static struct ip_tunnel *ipgre_tunnel_locate(struct net *net,
 
 	if (register_netdevice(dev) < 0)
 		goto failed_free;
+
+	/* Can use a lockless transmit, unless we generate output sequences */
+	if (!(nt->parms.o_flags & GRE_SEQ))
+		dev->features |= NETIF_F_LLTX;
 
 	dev_hold(dev);
 	ipgre_tunnel_link(ign, nt);
@@ -458,11 +459,11 @@ static void ipgre_err(struct sk_buff *skb, u32 info)
    GRE tunnels with enabled checksum. Tell them "thank you".
 
    Well, I wonder, rfc1812 was written by Cisco employee,
-   what the hell these idiots break standrads established
-   by themself???
+   what the hell these idiots break standards established
+   by themselves???
  */
 
-	struct iphdr *iph = (struct iphdr *)skb->data;
+	const struct iphdr *iph = (const struct iphdr *)skb->data;
 	__be16	     *p = (__be16*)(skb->data+(iph->ihl<<2));
 	int grehlen = (iph->ihl<<2) + 4;
 	const int type = icmp_hdr(skb)->type;
@@ -534,7 +535,7 @@ out:
 	rcu_read_unlock();
 }
 
-static inline void ipgre_ecn_decapsulate(struct iphdr *iph, struct sk_buff *skb)
+static inline void ipgre_ecn_decapsulate(const struct iphdr *iph, struct sk_buff *skb)
 {
 	if (INET_ECN_is_ce(iph->tos)) {
 		if (skb->protocol == htons(ETH_P_IP)) {
@@ -546,19 +547,19 @@ static inline void ipgre_ecn_decapsulate(struct iphdr *iph, struct sk_buff *skb)
 }
 
 static inline u8
-ipgre_ecn_encapsulate(u8 tos, struct iphdr *old_iph, struct sk_buff *skb)
+ipgre_ecn_encapsulate(u8 tos, const struct iphdr *old_iph, struct sk_buff *skb)
 {
 	u8 inner = 0;
 	if (skb->protocol == htons(ETH_P_IP))
 		inner = old_iph->tos;
 	else if (skb->protocol == htons(ETH_P_IPV6))
-		inner = ipv6_get_dsfield((struct ipv6hdr *)old_iph);
+		inner = ipv6_get_dsfield((const struct ipv6hdr *)old_iph);
 	return INET_ECN_encapsulate(tos, inner);
 }
 
 static int ipgre_rcv(struct sk_buff *skb)
 {
-	struct iphdr *iph;
+	const struct iphdr *iph;
 	u8     *h;
 	__be16    flags;
 	__sum16   csum = 0;
@@ -697,8 +698,9 @@ static netdev_tx_t ipgre_tunnel_xmit(struct sk_buff *skb, struct net_device *dev
 {
 	struct ip_tunnel *tunnel = netdev_priv(dev);
 	struct pcpu_tstats *tstats;
-	struct iphdr  *old_iph = ip_hdr(skb);
-	struct iphdr  *tiph;
+	const struct iphdr  *old_iph = ip_hdr(skb);
+	const struct iphdr  *tiph;
+	struct flowi4 fl4;
 	u8     tos;
 	__be16 df;
 	struct rtable *rt;     			/* Route to the other host */
@@ -714,12 +716,13 @@ static netdev_tx_t ipgre_tunnel_xmit(struct sk_buff *skb, struct net_device *dev
 
 	if (dev->header_ops && dev->type == ARPHRD_IPGRE) {
 		gre_hlen = 0;
-		tiph = (struct iphdr *)skb->data;
+		tiph = (const struct iphdr *)skb->data;
 	} else {
 		gre_hlen = tunnel->hlen;
 		tiph = &tunnel->parms.iph;
 	}
 
+	memset(&(IPCB(skb)->opt), 0, sizeof(IPCB(skb)->opt));
 	if ((dst = tiph->daddr) == 0) {
 		/* NBMA tunnel */
 
@@ -730,19 +733,21 @@ static netdev_tx_t ipgre_tunnel_xmit(struct sk_buff *skb, struct net_device *dev
 
 		if (skb->protocol == htons(ETH_P_IP)) {
 			rt = skb_rtable(skb);
-			if ((dst = rt->rt_gateway) == 0)
-				goto tx_error_icmp;
+			dst = rt->rt_gateway;
 		}
-#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+#if IS_ENABLED(CONFIG_IPV6)
 		else if (skb->protocol == htons(ETH_P_IPV6)) {
-			struct in6_addr *addr6;
+			struct neighbour *neigh = dst_get_neighbour(skb_dst(skb));
+			const struct in6_addr *addr6;
+			struct neighbour *neigh;
+			bool do_tx_error_icmp;
 			int addr_type;
-			struct neighbour *neigh = skb_dst(skb)->neighbour;
 
+			neigh = dst_neigh_lookup(skb_dst(skb), &ipv6_hdr(skb)->daddr);
 			if (neigh == NULL)
 				goto tx_error;
 
-			addr6 = (struct in6_addr *)&neigh->primary_key;
+			addr6 = (const struct in6_addr *)&neigh->primary_key;
 			addr_type = ipv6_addr_type(addr6);
 
 			if (addr_type == IPV6_ADDR_ANY) {
@@ -751,9 +756,14 @@ static netdev_tx_t ipgre_tunnel_xmit(struct sk_buff *skb, struct net_device *dev
 			}
 
 			if ((addr_type & IPV6_ADDR_COMPATv4) == 0)
+				do_tx_error_icmp = true;
+			else {
+				do_tx_error_icmp = false;
+				dst = addr6->s6_addr32[3];
+			}
+			neigh_release(neigh);
+			if (do_tx_error_icmp)
 				goto tx_error_icmp;
-
-			dst = addr6->s6_addr32[3];
 		}
 #endif
 		else
@@ -766,22 +776,15 @@ static netdev_tx_t ipgre_tunnel_xmit(struct sk_buff *skb, struct net_device *dev
 		if (skb->protocol == htons(ETH_P_IP))
 			tos = old_iph->tos;
 		else if (skb->protocol == htons(ETH_P_IPV6))
-			tos = ipv6_get_dsfield((struct ipv6hdr *)old_iph);
+			tos = ipv6_get_dsfield((const struct ipv6hdr *)old_iph);
 	}
 
-	{
-		struct flowi fl = {
-			.oif = tunnel->parms.link,
-			.fl4_dst = dst,
-			.fl4_src = tiph->saddr,
-			.fl4_tos = RT_TOS(tos),
-			.proto = IPPROTO_GRE,
-			.fl_gre_key = tunnel->parms.o_key
-		};
-		if (ip_route_output_key(dev_net(dev), &rt, &fl)) {
-			dev->stats.tx_carrier_errors++;
-			goto tx_error;
-		}
+	rt = ip_route_output_gre(dev_net(dev), &fl4, dst, tiph->saddr,
+				 tunnel->parms.o_key, RT_TOS(tos),
+				 tunnel->parms.link);
+	if (IS_ERR(rt)) {
+		dev->stats.tx_carrier_errors++;
+		goto tx_error;
 	}
 	tdev = rt->dst.dev;
 
@@ -810,7 +813,7 @@ static netdev_tx_t ipgre_tunnel_xmit(struct sk_buff *skb, struct net_device *dev
 			goto tx_error;
 		}
 	}
-#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+#if IS_ENABLED(CONFIG_IPV6)
 	else if (skb->protocol == htons(ETH_P_IPV6)) {
 		struct rt6_info *rt6 = (struct rt6_info *)skb_dst(skb);
 
@@ -864,7 +867,6 @@ static netdev_tx_t ipgre_tunnel_xmit(struct sk_buff *skb, struct net_device *dev
 	skb_reset_transport_header(skb);
 	skb_push(skb, gre_hlen);
 	skb_reset_network_header(skb);
-	memset(&(IPCB(skb)->opt), 0, sizeof(IPCB(skb)->opt));
 	IPCB(skb)->flags &= ~(IPSKB_XFRM_TUNNEL_SIZE | IPSKB_XFRM_TRANSFORMED |
 			      IPSKB_REROUTED);
 	skb_dst_drop(skb);
@@ -880,15 +882,15 @@ static netdev_tx_t ipgre_tunnel_xmit(struct sk_buff *skb, struct net_device *dev
 	iph->frag_off		=	df;
 	iph->protocol		=	IPPROTO_GRE;
 	iph->tos		=	ipgre_ecn_encapsulate(tos, old_iph, skb);
-	iph->daddr		=	rt->rt_dst;
-	iph->saddr		=	rt->rt_src;
+	iph->daddr		=	fl4.daddr;
+	iph->saddr		=	fl4.saddr;
 
 	if ((iph->ttl = tiph->ttl) == 0) {
 		if (skb->protocol == htons(ETH_P_IP))
 			iph->ttl = old_iph->ttl;
-#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+#if IS_ENABLED(CONFIG_IPV6)
 		else if (skb->protocol == htons(ETH_P_IPV6))
-			iph->ttl = ((struct ipv6hdr *)old_iph)->hop_limit;
+			iph->ttl = ((const struct ipv6hdr *)old_iph)->hop_limit;
 #endif
 		else
 			iph->ttl = ip4_dst_hoplimit(&rt->dst);
@@ -921,9 +923,10 @@ static netdev_tx_t ipgre_tunnel_xmit(struct sk_buff *skb, struct net_device *dev
 	__IPTUNNEL_XMIT(tstats, &dev->stats);
 	return NETDEV_TX_OK;
 
+#if IS_ENABLED(CONFIG_IPV6)
 tx_error_icmp:
 	dst_link_failure(skb);
-
+#endif
 tx_error:
 	dev->stats.tx_errors++;
 	dev_kfree_skb(skb);
@@ -934,7 +937,7 @@ static int ipgre_tunnel_bind_dev(struct net_device *dev)
 {
 	struct net_device *tdev = NULL;
 	struct ip_tunnel *tunnel;
-	struct iphdr *iph;
+	const struct iphdr *iph;
 	int hlen = LL_MAX_HEADER;
 	int mtu = ETH_DATA_LEN;
 	int addend = sizeof(struct iphdr) + 4;
@@ -945,17 +948,15 @@ static int ipgre_tunnel_bind_dev(struct net_device *dev)
 	/* Guess output device to choose reasonable mtu and needed_headroom */
 
 	if (iph->daddr) {
-		struct flowi fl = {
-			.oif = tunnel->parms.link,
-			.fl4_dst = iph->daddr,
-			.fl4_src = iph->saddr,
-			.fl4_tos = RT_TOS(iph->tos),
-			.proto = IPPROTO_GRE,
-			.fl_gre_key = tunnel->parms.o_key
-		};
+		struct flowi4 fl4;
 		struct rtable *rt;
 
-		if (!ip_route_output_key(dev_net(dev), &rt, &fl)) {
+		rt = ip_route_output_gre(dev_net(dev), &fl4,
+					 iph->daddr, iph->saddr,
+					 tunnel->parms.o_key,
+					 RT_TOS(iph->tos),
+					 tunnel->parms.link);
+		if (!IS_ERR(rt)) {
 			tdev = rt->dst.dev;
 			ip_rt_put(rt);
 		}
@@ -1191,7 +1192,7 @@ static int ipgre_header(struct sk_buff *skb, struct net_device *dev,
 
 static int ipgre_header_parse(const struct sk_buff *skb, unsigned char *haddr)
 {
-	struct iphdr *iph = (struct iphdr *) skb_mac_header(skb);
+	const struct iphdr *iph = (const struct iphdr *) skb_mac_header(skb);
 	memcpy(haddr, &iph->saddr, 4);
 	return 4;
 }
@@ -1207,17 +1208,16 @@ static int ipgre_open(struct net_device *dev)
 	struct ip_tunnel *t = netdev_priv(dev);
 
 	if (ipv4_is_multicast(t->parms.iph.daddr)) {
-		struct flowi fl = {
-			.oif = t->parms.link,
-			.fl4_dst = t->parms.iph.daddr,
-			.fl4_src = t->parms.iph.saddr,
-			.fl4_tos = RT_TOS(t->parms.iph.tos),
-			.proto = IPPROTO_GRE,
-			.fl_gre_key = t->parms.o_key
-		};
+		struct flowi4 fl4;
 		struct rtable *rt;
 
-		if (ip_route_output_key(dev_net(dev), &rt, &fl))
+		rt = ip_route_output_gre(dev_net(dev), &fl4,
+					 t->parms.iph.daddr,
+					 t->parms.iph.saddr,
+					 t->parms.o_key,
+					 RT_TOS(t->parms.iph.tos),
+					 t->parms.link);
+		if (IS_ERR(rt))
 			return -EADDRNOTAVAIL;
 		dev = rt->dst.dev;
 		ip_rt_put(rt);
@@ -1539,7 +1539,7 @@ static int ipgre_newlink(struct net *src_net, struct net_device *dev, struct nla
 		return -EEXIST;
 
 	if (dev->type == ARPHRD_ETHER && !tb[IFLA_ADDRESS])
-		random_ether_addr(dev->dev_addr);
+		eth_hw_addr_random(dev);
 
 	mtu = ipgre_tunnel_bind_dev(dev);
 	if (!tb[IFLA_MTU])
@@ -1719,7 +1719,7 @@ static int __init ipgre_init(void)
 {
 	int err;
 
-	printk(KERN_INFO "GRE over IPv4 tunneling driver\n");
+	pr_info("GRE over IPv4 tunneling driver\n");
 
 	err = register_pernet_device(&ipgre_net_ops);
 	if (err < 0)
@@ -1727,7 +1727,7 @@ static int __init ipgre_init(void)
 
 	err = gre_add_protocol(&ipgre_protocol, GREPROTO_CISCO);
 	if (err < 0) {
-		printk(KERN_INFO "ipgre init: can't add protocol\n");
+		pr_info("%s: can't add protocol\n", __func__);
 		goto add_proto_failed;
 	}
 
@@ -1756,7 +1756,7 @@ static void __exit ipgre_fini(void)
 	rtnl_link_unregister(&ipgre_tap_ops);
 	rtnl_link_unregister(&ipgre_link_ops);
 	if (gre_del_protocol(&ipgre_protocol, GREPROTO_CISCO) < 0)
-		printk(KERN_INFO "ipgre close: can't remove protocol\n");
+		pr_info("%s: can't remove protocol\n", __func__);
 	unregister_pernet_device(&ipgre_net_ops);
 }
 

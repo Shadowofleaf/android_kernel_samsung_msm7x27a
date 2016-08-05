@@ -212,10 +212,12 @@ static void dns_resolver_describe(const struct key *key, struct seq_file *m)
 	int err = key->type_data.x[0];
 
 	seq_puts(m, key->description);
-	if (err)
-		seq_printf(m, ": %d", err);
-	else
-		seq_printf(m, ": %u", key->datalen);
+	if (key_is_instantiated(key)) {
+		if (err)
+			seq_printf(m, ": %d", err);
+		else
+			seq_printf(m, ": %u", key->datalen);
+	}
 }
 
 /*
@@ -279,6 +281,7 @@ static int __init init_dns_resolver(void)
 
 	/* instruct request_key() to use this special keyring as a cache for
 	 * the results it looks up */
+	set_bit(KEY_FLAG_ROOT_CAN_CLEAR, &keyring->flags);
 	cred->thread_keyring = keyring;
 	cred->jit_keyring = KEY_REQKEY_DEFL_THREAD_KEYRING;
 	dns_resolver_cache = cred;

@@ -1,4 +1,4 @@
-/* Copyright (c) 2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -25,6 +25,7 @@ extern struct bus_type slimbus_type;
 #define SLIM_CL_PER_SUPERFRAME		6144
 #define SLIM_CL_PER_SUPERFRAME_DIV8	(SLIM_CL_PER_SUPERFRAME >> 3)
 #define SLIM_MAX_CLK_GEAR		10
+#define SLIM_MIN_CLK_GEAR		1
 #define SLIM_CL_PER_SL			4
 #define SLIM_SL_PER_SUPERFRAME		(SLIM_CL_PER_SUPERFRAME >> 2)
 #define SLIM_FRM_SLOTS_PER_SUPERFRAME	16
@@ -82,11 +83,22 @@ extern struct bus_type slimbus_type;
 #define SLIM_MSG_MC_NEXT_REMOVE_CHANNEL          0x58
 #define SLIM_MSG_MC_RECONFIGURE_NOW              0x5F
 
+/*
+ * Clock pause flag to indicate that the reconfig message
+ * corresponds to clock pause sequence
+ */
+#define SLIM_MSG_CLK_PAUSE_SEQ_FLG		(1U << 8)
+
 /* Value management messages */
 #define SLIM_MSG_MC_REQUEST_VALUE                0x60
 #define SLIM_MSG_MC_REQUEST_CHANGE_VALUE         0x61
 #define SLIM_MSG_MC_REPLY_VALUE                  0x64
 #define SLIM_MSG_MC_CHANGE_VALUE                 0x68
+
+/* Clock pause values defined in Table 66 (slimbus spec 1.01.01) */
+#define SLIM_CLK_FAST				0
+#define SLIM_CLK_CONST_PHASE			1
+#define SLIM_CLK_UNSPECIFIED			2
 
 struct slim_controller;
 struct slim_device;
@@ -131,10 +143,15 @@ struct slim_framer {
  * struct slim_addrt: slimbus address used internally by the slimbus framework.
  * @valid: If the device is still there or if the address can be reused.
  * @eaddr: 6-bytes-long elemental address
+ * @laddr: It is possible that controller will set a predefined logical address
+ *	rather than the one assigned by framework. (i.e. logical address may
+ *	not be same as index into this table). This entry will store the
+ *	logical address value for this enumeration address.
  */
 struct slim_addrt {
 	bool	valid;
 	u8	eaddr[6];
+	u8	laddr;
 };
 
 /*
@@ -144,7 +161,9 @@ struct slim_addrt {
  * For the header information, refer to Table 34-36.
  * @rl: Header field. remaining length.
  * @mt: Header field. Message type.
- * @mc: Header field. Message code for type mt.
+ * @mc: Header field. LSB is message code for type mt. Framework will set MSB to
+ *	SLIM_MSG_CLK_PAUSE_SEQ_FLG in case "mc" in the reconfiguration sequence
+ *	is for pausing the clock.
  * @dt: Header field. Destination type.
  * @ec: Element size. Used for elemental access APIs.
  * @len: Length of payload. (excludes ec)
@@ -160,7 +179,7 @@ struct slim_addrt {
 struct slim_msg_txn {
 	u8			rl;
 	u8			mt;
-	u8			mc;
+	u16			mc;
 	u8			dt;
 	u16			ec;
 	u8			len;
@@ -364,9 +383,19 @@ struct slim_ch {
  * @seglen: Segment length of this channel.
  * @rootexp: root exponent of this channel. Rate can be found using rootexp and
  *	coefficient. Used during scheduling.
- * @srch: Source ports used by this channel.
- * @nsrc: number of source ports used by this channel.
- * @sinkh: Sink port used by this channel.
+ * @srch: Source port used by this channel.
+ * @sinkh: Sink ports used by this channel.
+ * @nsink: number of sink ports used by this channel.
+ * @chan: Channel number sent on hardware lines for this channel. May not be
+ *	equal to array-index into chans if client requested to use number beyond
+ *	channel-array for the controller.
+ * @ref: Reference number to keep track of how many clients (upto 2) are using
+ *	this channel.
+ * @def: Used to keep track of how many times the channel definition is sent
+ *	to hardware and this will decide if channel-remove can be sent for the
+ *	channel. Channel definition may be sent upto twice (once per producer
+ *	and once per consumer). Channel removal should be sent only once to
+ *	avoid clients getting underflow/overflow errors.
  */
 struct slim_ich {
 	struct slim_ch		prop;
@@ -380,9 +409,12 @@ struct slim_ich {
 	u32			newintr;
 	u32			seglen;
 	u8			rootexp;
-	u32			*srch;
-	int			nsrc;
-	u32			sinkh;
+	u32			srch;
+	u32			*sinkh;
+	int			nsink;
+	u8			chan;
+	int			ref;
+	int			def;
 };
 
 /*
@@ -417,6 +449,24 @@ struct slim_sched {
 };
 
 /*
+ * enum slim_clk_state: Slimbus controller's clock state used internally for
+ *	maintaining current clock state.
+ * @SLIM_CLK_ACTIVE: Slimbus clock is active
+ * @SLIM_CLK_PAUSE_FAILED: Slimbus controlled failed to go in clock pause.
+ *	Hardware-wise, this state is same as active but controller will wait on
+ *	completion before making transition to SLIM_CLK_ACTIVE in framework
+ * @SLIM_CLK_ENTERING_PAUSE: Slimbus clock pause sequence is being sent on the
+ *	bus. If this succeeds, state changes to SLIM_CLK_PAUSED. If the
+ *	transition fails, state changes to SLIM_CLK_PAUSE_FAILED
+ * @SLIM_CLK_PAUSED: Slimbus controller clock has paused.
+ */
+enum slim_clk_state {
+	SLIM_CLK_ACTIVE,
+	SLIM_CLK_ENTERING_PAUSE,
+	SLIM_CLK_PAUSE_FAILED,
+	SLIM_CLK_PAUSED,
+};
+/*
  * struct slim_controller: Represents manager for a SlimBUS
  *				(similar to 'master' on I2C)
  * @dev: Device interface to this driver
@@ -424,16 +474,26 @@ struct slim_sched {
  * @list: Link with other slimbus controllers
  * @name: Name for this controller
  * @clkgear: Current clock gear in which this bus is running
+ * @min_cg: Minimum clock gear supported by this controller (default value: 1)
+ * @max_cg: Maximum clock gear supported by this controller (default value: 10)
+ * @clk_state: Controller's clock state from enum slim_clk_state
+ * @pause_comp: Signals completion of clock pause sequence. This is useful when
+ *	client tries to call slimbus transaction when controller may be entering
+ *	clock pause.
  * @a_framer: Active framer which is clocking the bus managed by this controller
  * @m_ctrl: Mutex protecting controller data structures (ports, channels etc)
  * @addrt: Logical address table
  * @num_dev: Number of active slimbus slaves on this bus
+ * @devs: List of devices on this controller
+ * @wq: Workqueue per controller used to notify devices when they report present
  * @txnt: Table of transactions having transaction ID
  * @last_tid: size of the table txnt (can't grow beyond 256 since TID is 8-bits)
  * @ports: Ports associated with this controller
  * @nports: Number of ports supported by the controller
  * @chans: Channels associated with this controller
  * @nchans: Number of channels supported
+ * @reserved: Reserved channels that controller wants to use internally
+ *		Clients will be assigned channel numbers after this number
  * @sched: scheduler structure used by the controller
  * @dev_released: completion used to signal when sysfs has released this
  *	controller so that it can be deleted during shutdown
@@ -443,6 +503,14 @@ struct slim_sched {
  * @set_laddr: Setup logical address at laddr for the slave with elemental
  *	address e_addr. Drivers implementing controller will be expected to
  *	send unicast message to this device with its logical address.
+ * @allocbw: Controller can override default reconfiguration and channel
+ *	scheduling algorithm.
+ * @get_laddr: It is possible that controller needs to set fixed logical
+ *	address table and get_laddr can be used in that case so that controller
+ *	can do this assignment.
+ * @wakeup: This function pointer implements controller-specific procedure
+ *	to wake it up from clock-pause. Framework will call this to bring
+ *	the controller out of clock pause.
  * @config_port: Configure a port and make it ready for data transfer. This is
  *	called by framework after connect_port message is sent successfully.
  * @framer_handover: If this controller has multiple framers, this API will
@@ -461,22 +529,34 @@ struct slim_controller {
 	struct list_head	list;
 	char			name[SLIMBUS_NAME_SIZE];
 	int			clkgear;
+	int			min_cg;
+	int			max_cg;
+	enum slim_clk_state	clk_state;
+	struct completion	pause_comp;
 	struct slim_framer	*a_framer;
 	struct mutex		m_ctrl;
 	struct slim_addrt	*addrt;
 	u8			num_dev;
+	struct list_head	devs;
+	struct workqueue_struct *wq;
 	struct slim_msg_txn	**txnt;
 	u8			last_tid;
 	struct slim_port	*ports;
 	int			nports;
 	struct slim_ich		*chans;
 	int			nchans;
+	u8			reserved;
 	struct slim_sched	sched;
 	struct completion	dev_released;
 	int			(*xfer_msg)(struct slim_controller *ctrl,
 				struct slim_msg_txn *txn);
 	int			(*set_laddr)(struct slim_controller *ctrl,
 				const u8 *ea, u8 elen, u8 laddr);
+	int			(*allocbw)(struct slim_device *sb,
+				int *subfrmc, int *clkgear);
+	int			(*get_laddr)(struct slim_controller *ctrl,
+				const u8 *ea, u8 elen, u8 *laddr);
+	int			(*wakeup)(struct slim_controller *ctrl);
 	int			(*config_port)(struct slim_controller *ctrl,
 				u8 port);
 	int			(*framer_handover)(struct slim_controller *ctrl,
@@ -507,6 +587,7 @@ struct slim_driver {
 	int				(*suspend)(struct slim_device *sldev,
 					pm_message_t pmesg);
 	int				(*resume)(struct slim_device *sldev);
+	int				(*device_up)(struct slim_device *sldev);
 
 	struct device_driver		driver;
 	const struct slim_device_id	*id_table;
@@ -539,6 +620,11 @@ struct slim_pending_ch {
  *  @mark_define: List of channels pending definition/activation.
  *  @mark_suspend: List of channels pending suspend.
  *  @mark_removal: List of channels pending removal.
+ *  @notified: Flag to indicate whether this device has been notified. The
+ *	device may report present multiple times, but should be notified only
+ *	first time it has reported present.
+ *  @dev_list: List of devices on a controller
+ *  @wd: Work structure associated with workqueue for presence notification
  *  @sldev_reconf: Mutex to protect the pending data-channel lists.
  *  @pending_msgsl: Message bandwidth reservation request by this client in
  *	slots that's pending reconfiguration.
@@ -557,6 +643,9 @@ struct slim_device {
 	struct list_head	mark_define;
 	struct list_head	mark_suspend;
 	struct list_head	mark_removal;
+	bool			notified;
+	struct list_head	dev_list;
+	struct work_struct	wd;
 	struct mutex		sldev_reconf;
 	u32			pending_msgsl;
 	u32			cur_msgsl;
@@ -632,7 +721,7 @@ extern int slim_request_clear_inf_element(struct slim_device *sb,
  */
 extern int slim_xfer_msg(struct slim_controller *ctrl,
 			struct slim_device *sbdev, struct slim_ele_access *msg,
-			u8 mc, u8 *rbuf, const u8 *wbuf, u8 len);
+			u16 mc, u8 *rbuf, const u8 *wbuf, u8 len);
 /* end of message apis */
 
 /* Port management for manager device APIs */
@@ -698,18 +787,30 @@ extern enum slim_port_err slim_port_get_xfer_status(struct slim_device *sb,
 			u32 ph, u8 **done_buf, u32 *done_len);
 
 /*
- * slim_connect_ports: Connect port(s) to channel.
+ * slim_connect_src: Connect source port to channel.
  * @sb: client handle
- * @srch: source handles to be connected to this channel
- * @nrsc: number of source ports
- * @sinkh: sink handle to be connected to this channel
+ * @srch: source handle to be connected to this channel
  * @chanh: Channel with which the ports need to be associated with.
- * Per slimbus specification, a channel may have multiple source-ports and 1
- * sink port.Channel specified in chanh needs to be allocated first.
+ * Per slimbus specification, a channel may have 1 source port.
+ * Channel specified in chanh needs to be allocated first.
+ * Returns -EALREADY if source is already configured for this channel.
+ * Returns -ENOTCONN if channel is not allocated
  */
-extern int slim_connect_ports(struct slim_device *sb, u32 *srch, int nsrc,
-				u32 sinkh, u16 chanh);
+extern int slim_connect_src(struct slim_device *sb, u32 srch, u16 chanh);
 
+/*
+ * slim_connect_sink: Connect sink port(s) to channel.
+ * @sb: client handle
+ * @sinkh: sink handle(s) to be connected to this channel
+ * @nsink: number of sinks
+ * @chanh: Channel with which the ports need to be associated with.
+ * Per slimbus specification, a channel may have multiple sink-ports.
+ * Channel specified in chanh needs to be allocated first.
+ * Returns -EALREADY if sink is already configured for this channel.
+ * Returns -ENOTCONN if channel is not allocated
+ */
+extern int slim_connect_sink(struct slim_device *sb, u32 *sinkh, int nsink,
+				u16 chanh);
 /*
  * slim_disconnect_ports: Disconnect port(s) from channel
  * @sb: client handle
@@ -738,18 +839,32 @@ extern int slim_get_slaveport(u8 la, int idx, u32 *rh, enum slim_port_flow flw);
  * slim_alloc_ch: Allocate a slimbus channel and return its handle.
  * @sb: client handle.
  * @chanh: return channel handle
- * Slimbus channels are limited to 256 per specification. LSB of the handle
- * indicates channel number and MSB of the handle is used by the slimbus
- * framework. -EXFULL is returned if all channels are in use.
+ * Slimbus channels are limited to 256 per specification.
+ * -EXFULL is returned if all channels are in use.
  * Although slimbus specification supports 256 channels, a controller may not
  * support that many channels.
  */
 extern int slim_alloc_ch(struct slim_device *sb, u16 *chanh);
 
 /*
+ * slim_query_ch: Get reference-counted handle for a channel number. Every
+ * channel is reference counted by one as producer and the others as
+ * consumer)
+ * @sb: client handle
+ * @chan: slimbus channel number
+ * @chanh: return channel handle
+ * If request channel number is not in use, it is allocated, and reference
+ * count is set to one. If the channel was was already allocated, this API
+ * will return handle to that channel and reference count is incremented.
+ * -EXFULL is returned if all channels are in use
+ */
+extern int slim_query_ch(struct slim_device *sb, u8 chan, u16 *chanh);
+/*
  * slim_dealloc_ch: Deallocate channel allocated using the API above
  * -EISCONN is returned if the channel is tried to be deallocated without
  *  being removed first.
+ *  -ENOTCONN is returned if deallocation is tried on a channel that's not
+ *  allocated.
  */
 extern int slim_dealloc_ch(struct slim_device *sb, u16 chanh);
 
@@ -767,8 +882,8 @@ extern int slim_dealloc_ch(struct slim_device *sb, u16 chanh);
  *	(e.g. 5.1 audio has 6 channels with same parameters. They will all be
  *	grouped and given 1 handle for simplicity and avoid repeatedly calling
  *	the API)
- * -EISCONN is returned if the channel is already connected. -EBUSY is
- * returned if the channel is already allocated to some other client.
+ * -EISCONN is returned if channel is already used with different parameters.
+ * -ENXIO is returned if the channel is not yet allocated.
  */
 extern int slim_define_ch(struct slim_device *sb, struct slim_ch *prop,
 				u16 *chanh, u8 nchan, bool grp, u16 *grph);
@@ -789,6 +904,7 @@ extern int slim_define_ch(struct slim_device *sb, struct slim_ch *prop,
  * -EXFULL is returned if there is no space in TDM to reserve the bandwidth.
  * -EISCONN/-ENOTCONN is returned if the channel is already connected or not
  * yet defined.
+ * -EINVAL is returned if individual control of a grouped-channel is attempted.
  */
 extern int slim_control_ch(struct slim_device *sb, u16 grpchanh,
 				enum slim_ch_control chctrl, bool commit);
@@ -822,6 +938,20 @@ extern int slim_reservemsg_bw(struct slim_device *sb, u32 bw_bps, bool commit);
  * progress.
  */
 extern int slim_reconfigure_now(struct slim_device *sb);
+
+/*
+ * slim_ctrl_clk_pause: Called by slimbus controller to request clock to be
+ *	paused or woken up out of clock pause
+ * @ctrl: controller requesting bus to be paused or woken up
+ * @wakeup: Wakeup this controller from clock pause.
+ * @restart: Restart time value per spec used for clock pause. This value
+ *	isn't used when controller is to be woken up.
+ * This API executes clock pause reconfiguration sequence if wakeup is false.
+ * If wakeup is true, controller's wakeup is called
+ * Slimbus clock is idle and can be disabled by the controller later.
+ */
+extern int slim_ctrl_clk_pause(struct slim_controller *ctrl, bool wakeup,
+		u8 restart);
 
 /*
  * slim_driver_register: Client driver registration with slimbus
@@ -863,14 +993,17 @@ extern void slim_remove_device(struct slim_device *sbdev);
  * @ctrl: Controller with which device is enumerated.
  * @e_addr: 6-byte elemental address of the device.
  * @e_len: buffer length for e_addr
- * @laddr: Return logical address.
+ * @laddr: Return logical address (if valid flag is false)
+ * @valid: true if laddr holds a valid address that controller wants to
+ *	set for this enumeration address. Otherwise framework sets index into
+ *	address table as logical address.
  * Called by controller in response to REPORT_PRESENT. Framework will assign
  * a logical address to this enumeration address.
  * Function returns -EXFULL to indicate that all logical addresses are already
  * taken.
  */
 extern int slim_assign_laddr(struct slim_controller *ctrl, const u8 *e_addr,
-				u8 e_len, u8 *laddr);
+				u8 e_len, u8 *laddr, bool valid);
 
 /*
  * slim_msg_response: Deliver Message response received from a device to the

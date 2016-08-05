@@ -56,7 +56,7 @@ struct usbnet {
 	struct sk_buff_head	rxq_pause;
 	struct urb		*interrupt;
 	struct usb_anchor	deferred;
-	struct tasklet_struct	bh;
+	struct work_struct	bh_w;
 
 	struct work_struct	kevent;
 	unsigned long		flags;
@@ -68,6 +68,7 @@ struct usbnet {
 #		define EVENT_RX_PAUSED	5
 #		define EVENT_DEV_WAKING 6
 #		define EVENT_DEV_ASLEEP 7
+#		define EVENT_DEV_OPEN	8
 };
 
 static inline struct usb_driver *driver_of(struct usb_interface *intf)
@@ -97,11 +98,14 @@ struct driver_info {
 
 #define FLAG_LINK_INTR	0x0800		/* updates link (carrier) status */
 
+#define FLAG_POINTTOPOINT 0x1000	/* possibly use "usb%d" names */
+
 /*
  * Indicates to usbnet, that USB driver accumulates multiple IP packets.
  * Affects statistic (counters) and short packet handling.
  */
-#define FLAG_MULTI_PACKET	0x1000
+#define FLAG_MULTI_PACKET	0x2000
+#define FLAG_RX_ASSEMBLE	0x4000	/* rx packets may span >1 frames */
 
 	/* init device ... can sleep, or cause probe() failure */
 	int	(*bind)(struct usbnet *, struct usb_interface *);
@@ -126,6 +130,9 @@ struct driver_info {
 
 	/* link reset handling, called from defer_kevent */
 	int	(*link_reset)(struct usbnet *);
+
+	/*in case if usbnet wrapper wants to override rx_complete()*/
+	void (*rx_complete) (struct urb *);
 
 	/* fixup rx packet (strip framing) */
 	int	(*rx_fixup)(struct usbnet *dev, struct sk_buff *skb);
@@ -172,7 +179,9 @@ struct cdc_state {
 };
 
 extern int usbnet_generic_cdc_bind(struct usbnet *, struct usb_interface *);
+extern int usbnet_cdc_bind(struct usbnet *, struct usb_interface *);
 extern void usbnet_cdc_unbind(struct usbnet *, struct usb_interface *);
+extern void usbnet_cdc_status(struct usbnet *, struct urb *);
 
 /* CDC and RNDIS support the same host-chosen packet filters for IN transfers */
 #define	DEFAULT_FILTER	(USB_CDC_PACKET_TYPE_BROADCAST \
@@ -185,7 +194,8 @@ extern void usbnet_cdc_unbind(struct usbnet *, struct usb_interface *);
 enum skb_state {
 	illegal = 0,
 	tx_start, tx_done,
-	rx_start, rx_done, rx_cleanup
+	rx_start, rx_done, rx_cleanup,
+	unlink_start
 };
 
 struct skb_data {	/* skb->cb is one of these */
@@ -221,5 +231,7 @@ extern u32 usbnet_get_msglevel(struct net_device *);
 extern void usbnet_set_msglevel(struct net_device *, u32);
 extern void usbnet_get_drvinfo(struct net_device *, struct ethtool_drvinfo *);
 extern int usbnet_nway_reset(struct net_device *net);
+extern void usbnet_terminate_urbs(struct usbnet *dev);
+extern void rx_complete(struct urb *urb);
 
 #endif /* __LINUX_USB_USBNET_H */

@@ -1,7 +1,4 @@
-/*
- * Qualcomm PMIC8XXX GPIO driver
- *
- * Copyright (c) 2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -15,6 +12,7 @@
 
 #define pr_fmt(fmt)	"%s: " fmt, __func__
 
+#include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/gpio.h>
 #include <linux/mfd/pm8xxx/core.h>
@@ -84,9 +82,6 @@ static int pm_gpio_get(struct pm_gpio_chip *pm_gpio_chip, unsigned gpio)
 {
 	int	mode;
 
-	if (gpio >= pm_gpio_chip->gpio_chip.ngpio || pm_gpio_chip == NULL)
-		return -EINVAL;
-
 	/* Get gpio value from config bank 1 if output gpio.
 	   Get gpio value from IRQ RT status register for all other gpio modes.
 	 */
@@ -105,9 +100,6 @@ static int pm_gpio_set(struct pm_gpio_chip *pm_gpio_chip,
 	int	rc;
 	u8	bank1;
 	unsigned long flags;
-
-	if (gpio >= pm_gpio_chip->gpio_chip.ngpio || pm_gpio_chip == NULL)
-		return -EINVAL;
 
 	spin_lock_irqsave(&pm_gpio_chip->pm_lock, flags);
 	bank1 = PM_GPIO_WRITE
@@ -289,7 +281,8 @@ static int __devinit pm_gpio_probe(struct platform_device *pdev)
 					GFP_KERNEL);
 	if (!pm_gpio_chip->bank1) {
 		pr_err("Cannot allocate pm_gpio_chip->bank1\n");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto free_chip;
 	}
 
 	spin_lock_init(&pm_gpio_chip->pm_lock);
@@ -301,7 +294,7 @@ static int __devinit pm_gpio_probe(struct platform_device *pdev)
 	pm_gpio_chip->gpio_chip.set = pm_gpio_write;
 	pm_gpio_chip->gpio_chip.dbg_show = pm_gpio_dbg_show;
 	pm_gpio_chip->gpio_chip.ngpio = pdata->gpio_cdata.ngpios;
-	pm_gpio_chip->gpio_chip.can_sleep = 1;
+	pm_gpio_chip->gpio_chip.can_sleep = 0;
 	pm_gpio_chip->gpio_chip.dev = &pdev->dev;
 	pm_gpio_chip->gpio_chip.base = pdata->gpio_base;
 	pm_gpio_chip->irq_base = platform_get_irq(pdev, 0);
@@ -332,6 +325,8 @@ remove_chip:
 		pr_err("failed to remove gpio chip\n");
 reset_drvdata:
 	platform_set_drvdata(pdev, NULL);
+	kfree(pm_gpio_chip->bank1);
+free_chip:
 	kfree(pm_gpio_chip);
 	return ret;
 }
@@ -429,7 +424,7 @@ int pm8xxx_gpio_config(int gpio, struct pm_gpio *param)
 
 	return rc;
 }
-EXPORT_SYMBOL_GPL(pm8xxx_gpio_config);
+EXPORT_SYMBOL(pm8xxx_gpio_config);
 
 static struct platform_driver pm_gpio_driver = {
 	.probe		= pm_gpio_probe,

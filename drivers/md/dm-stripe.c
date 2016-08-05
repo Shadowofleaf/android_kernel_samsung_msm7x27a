@@ -75,8 +75,9 @@ static int get_stripe(struct dm_target *ti, struct stripe_c *sc,
 		      unsigned int stripe, char **argv)
 {
 	unsigned long long start;
+	char dummy;
 
-	if (sscanf(argv[1], "%llu", &start) != 1)
+	if (sscanf(argv[1], "%llu%c", &start, &dummy) != 1)
 		return -EINVAL;
 
 	if (dm_get_device(ti, argv[0], dm_table_get_mode(ti->table),
@@ -301,8 +302,8 @@ static int stripe_map(struct dm_target *ti, struct bio *bio,
  *
  */
 
-static int stripe_status(struct dm_target *ti,
-			 status_type_t type, char *result, unsigned int maxlen)
+static void stripe_status(struct dm_target *ti,
+			  status_type_t type, char *result, unsigned int maxlen)
 {
 	struct stripe_c *sc = (struct stripe_c *) ti->private;
 	char buffer[sc->stripes + 1];
@@ -329,7 +330,6 @@ static int stripe_status(struct dm_target *ti,
 			    (unsigned long long)sc->stripe[i].physical_start);
 		break;
 	}
-	return 0;
 }
 
 static int stripe_end_io(struct dm_target *ti, struct bio *bio,
@@ -396,9 +396,29 @@ static void stripe_io_hints(struct dm_target *ti,
 	blk_limits_io_opt(limits, chunk_size * sc->stripes);
 }
 
+static int stripe_merge(struct dm_target *ti, struct bvec_merge_data *bvm,
+			struct bio_vec *biovec, int max_size)
+{
+	struct stripe_c *sc = ti->private;
+	sector_t bvm_sector = bvm->bi_sector;
+	uint32_t stripe;
+	struct request_queue *q;
+
+	stripe_map_sector(sc, bvm_sector, &stripe, &bvm_sector);
+
+	q = bdev_get_queue(sc->stripe[stripe].dev->bdev);
+	if (!q->merge_bvec_fn)
+		return max_size;
+
+	bvm->bi_bdev = sc->stripe[stripe].dev->bdev;
+	bvm->bi_sector = sc->stripe[stripe].physical_start + bvm_sector;
+
+	return min(max_size, q->merge_bvec_fn(q, bvm, biovec));
+}
+
 static struct target_type stripe_target = {
 	.name   = "striped",
-	.version = {1, 3, 1},
+	.version = {1, 4, 0},
 	.module = THIS_MODULE,
 	.ctr    = stripe_ctr,
 	.dtr    = stripe_dtr,
@@ -407,6 +427,7 @@ static struct target_type stripe_target = {
 	.status = stripe_status,
 	.iterate_devices = stripe_iterate_devices,
 	.io_hints = stripe_io_hints,
+	.merge  = stripe_merge,
 };
 
 int __init dm_stripe_init(void)

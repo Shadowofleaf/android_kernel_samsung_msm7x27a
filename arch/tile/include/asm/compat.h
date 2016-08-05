@@ -215,8 +215,8 @@ struct compat_sigaction;
 struct compat_siginfo;
 struct compat_sigaltstack;
 long compat_sys_execve(const char __user *path,
-		       const compat_uptr_t __user *argv,
-		       const compat_uptr_t __user *envp, struct pt_regs *);
+		       compat_uptr_t __user *argv,
+		       compat_uptr_t __user *envp, struct pt_regs *);
 long compat_sys_rt_sigaction(int sig, struct compat_sigaction __user *act,
 			     struct compat_sigaction __user *oact,
 			     size_t sigsetsize);
@@ -241,17 +241,6 @@ long compat_sys_fallocate(int fd, int mode,
 			  u32 len_lo, u32 len_hi);
 long compat_sys_sched_rr_get_interval(compat_pid_t pid,
 				      struct compat_timespec __user *interval);
-
-/* Versions of compat functions that differ from generic Linux. */
-struct compat_msgbuf;
-long tile_compat_sys_msgsnd(int msqid,
-			    struct compat_msgbuf __user *msgp,
-			    size_t msgsz, int msgflg);
-long tile_compat_sys_msgrcv(int msqid,
-			    struct compat_msgbuf __user *msgp,
-			    size_t msgsz, long msgtyp, int msgflg);
-long tile_compat_sys_ptrace(compat_long_t request, compat_long_t pid,
-			    compat_long_t addr, compat_long_t data);
 
 /* Tilera Linux syscalls that don't have "compat" versions. */
 #define compat_sys_flush_cache sys_flush_cache

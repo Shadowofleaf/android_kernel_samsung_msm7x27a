@@ -1,7 +1,7 @@
 /* arch/arm/mach-msm/memory.c
  *
  * Copyright (C) 2007 Google, Inc.
- * Copyright (c) 2009-2011, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2009-2012, The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -36,35 +36,20 @@
 #include <linux/android_pmem.h>
 #include <mach/msm_iomap.h>
 #include <mach/socinfo.h>
-#include <../../mm/mm.h>
+#include <linux/sched.h>
+#include <linux/of_fdt.h>
 
-int arch_io_remap_pfn_range(struct vm_area_struct *vma, unsigned long addr,
-			    unsigned long pfn, unsigned long size, pgprot_t prot)
-{
-	unsigned long pfn_addr = pfn << PAGE_SHIFT;
-	if ((pfn_addr >= 0x88000000) && (pfn_addr < 0xD0000000)) {
-		prot = pgprot_device(prot);
-		pr_debug("remapping device %lx\n", prot);
-	}
-	return remap_pfn_range(vma, addr, pfn, size, prot);
-}
+/* fixme */
+#include <asm/tlbflush.h>
+#include <../../mm/mm.h>
+#include <linux/fmem.h>
 
 void *strongly_ordered_page;
 char strongly_ordered_mem[PAGE_SIZE*2-4];
 
-/*
- * The trick of making the zero page strongly ordered no longer
- * works. We no longer want to make a second alias to the zero
- * page that is strongly ordered. Manually changing the bits
- * in the page table for the zero page would have side effects
- * elsewhere that aren't necessary. The result is that we need
- * to get a page from else where. Given when the first call
- * to write_to_strongly_ordered_memory occurs, using bootmem
- * to get a page makes the most sense.
- */
 void map_page_strongly_ordered(void)
 {
-#if defined(CONFIG_ARCH_MSM7X27) || defined(CONFIG_ARCH_MSM7X27A)
+#if defined(CONFIG_ARCH_MSM7X27) && !defined(CONFIG_ARCH_MSM7X27A)
 	long unsigned int phys;
 	struct map_desc map;
 
@@ -87,7 +72,7 @@ EXPORT_SYMBOL(map_page_strongly_ordered);
 
 void write_to_strongly_ordered_memory(void)
 {
-#if defined(CONFIG_ARCH_MSM7X27) || defined(CONFIG_ARCH_MSM7X27A)
+#if defined(CONFIG_ARCH_MSM7X27) && !defined(CONFIG_ARCH_MSM7X27A)
 	if (!strongly_ordered_page) {
 		if (!in_interrupt())
 			map_page_strongly_ordered();
@@ -103,70 +88,32 @@ void write_to_strongly_ordered_memory(void)
 }
 EXPORT_SYMBOL(write_to_strongly_ordered_memory);
 
-void flush_axi_bus_buffer(void)
-{
-#if defined(CONFIG_ARCH_MSM7X27) || defined(CONFIG_ARCH_MSM7X27A)
-	__asm__ __volatile__ ("mcr p15, 0, %0, c7, c10, 5" \
-				    : : "r" (0) : "memory");
-	write_to_strongly_ordered_memory();
-#endif
-}
-
-#define CACHE_LINE_SIZE 32
-
-/* These cache related routines make the assumption that the associated
- * physical memory is contiguous. They will operate on all (L1
- * and L2 if present) caches.
+/* These cache related routines make the assumption (if outer cache is
+ * available) that the associated physical memory is contiguous.
+ * They will operate on all (L1 and L2 if present) caches.
  */
 void clean_and_invalidate_caches(unsigned long vstart,
 	unsigned long length, unsigned long pstart)
 {
-	unsigned long vaddr;
-
-	for (vaddr = vstart; vaddr < vstart + length; vaddr += CACHE_LINE_SIZE)
-		asm ("mcr p15, 0, %0, c7, c14, 1" : : "r" (vaddr));
-#ifdef CONFIG_OUTER_CACHE
+	dmac_flush_range((void *)vstart, (void *) (vstart + length));
 	outer_flush_range(pstart, pstart + length);
-#endif
-	asm ("mcr p15, 0, %0, c7, c10, 4" : : "r" (0));
-	asm ("mcr p15, 0, %0, c7, c5, 0" : : "r" (0));
-
-	flush_axi_bus_buffer();
 }
 
 void clean_caches(unsigned long vstart,
 	unsigned long length, unsigned long pstart)
 {
-	unsigned long vaddr;
-
-	for (vaddr = vstart; vaddr < vstart + length; vaddr += CACHE_LINE_SIZE)
-		asm ("mcr p15, 0, %0, c7, c10, 1" : : "r" (vaddr));
-#ifdef CONFIG_OUTER_CACHE
+	dmac_clean_range((void *)vstart, (void *) (vstart + length));
 	outer_clean_range(pstart, pstart + length);
-#endif
-	asm ("mcr p15, 0, %0, c7, c10, 4" : : "r" (0));
-	asm ("mcr p15, 0, %0, c7, c5, 0" : : "r" (0));
-
-	flush_axi_bus_buffer();
 }
 
 void invalidate_caches(unsigned long vstart,
 	unsigned long length, unsigned long pstart)
 {
-	unsigned long vaddr;
-
-	for (vaddr = vstart; vaddr < vstart + length; vaddr += CACHE_LINE_SIZE)
-		asm ("mcr p15, 0, %0, c7, c6, 1" : : "r" (vaddr));
-#ifdef CONFIG_OUTER_CACHE
+	dmac_inv_range((void *)vstart, (void *) (vstart + length));
 	outer_inv_range(pstart, pstart + length);
-#endif
-	asm ("mcr p15, 0, %0, c7, c10, 4" : : "r" (0));
-	asm ("mcr p15, 0, %0, c7, c5, 0" : : "r" (0));
-
-	flush_axi_bus_buffer();
 }
 
-void *alloc_bootmem_aligned(unsigned long size, unsigned long alignment)
+void * __init alloc_bootmem_aligned(unsigned long size, unsigned long alignment)
 {
 	void *unused_addr = NULL;
 	unsigned long addr, tmp_size, unused_size;
@@ -194,32 +141,6 @@ void *alloc_bootmem_aligned(unsigned long size, unsigned long alignment)
 	return (void *)addr;
 }
 
-int (*change_memory_power)(unsigned long, unsigned long, int);
-
-int platform_physical_remove_pages(unsigned long start_pfn,
-	unsigned long nr_pages)
-{
-	if (!change_memory_power)
-		return 0;
-	return change_memory_power(start_pfn, nr_pages, MEMORY_DEEP_POWERDOWN);
-}
-
-int platform_physical_active_pages(unsigned long start_pfn,
-	unsigned long nr_pages)
-{
-	if (!change_memory_power)
-		return 0;
-	return change_memory_power(start_pfn, nr_pages, MEMORY_ACTIVE);
-}
-
-int platform_physical_low_power_pages(unsigned long start_pfn,
-	unsigned long nr_pages)
-{
-	if (!change_memory_power)
-		return 0;
-	return change_memory_power(start_pfn, nr_pages, MEMORY_SELF_REFRESH);
-}
-
 char *memtype_name[] = {
 	"SMI_KERNEL",
 	"SMI",
@@ -229,22 +150,63 @@ char *memtype_name[] = {
 
 struct reserve_info *reserve_info;
 
+static unsigned long stable_size(struct membank *mb,
+	unsigned long unstable_limit)
+{
+	unsigned long upper_limit = mb->start + mb->size;
+
+	if (!unstable_limit)
+		return mb->size;
+
+	/* Check for 32 bit roll-over */
+	if (upper_limit >= mb->start) {
+		/* If we didn't roll over we can safely make the check below */
+		if (upper_limit <= unstable_limit)
+			return mb->size;
+	}
+
+	if (mb->start >= unstable_limit)
+		return 0;
+	return unstable_limit - mb->start;
+}
+
+/* stable size of all memory banks contiguous to and below this one */
+static unsigned long total_stable_size(unsigned long bank)
+{
+	int i;
+	struct membank *mb = &meminfo.bank[bank];
+	int memtype = reserve_info->paddr_to_memtype(mb->start);
+	unsigned long size;
+
+	size = stable_size(mb, reserve_info->low_unstable_address);
+	for (i = bank - 1, mb = &meminfo.bank[bank - 1]; i >= 0; i--, mb--) {
+		if (mb->start + mb->size != (mb + 1)->start)
+			break;
+		if (reserve_info->paddr_to_memtype(mb->start) != memtype)
+			break;
+		size += stable_size(mb, reserve_info->low_unstable_address);
+	}
+	return size;
+}
+
 static void __init calculate_reserve_limits(void)
 {
 	int i;
 	struct membank *mb;
 	int memtype;
 	struct memtype_reserve *mt;
+	unsigned long size;
 
 	for (i = 0, mb = &meminfo.bank[0]; i < meminfo.nr_banks; i++, mb++)  {
 		memtype = reserve_info->paddr_to_memtype(mb->start);
 		if (memtype == MEMTYPE_NONE) {
 			pr_warning("unknown memory type for bank at %lx\n",
-				mb->start);
+				(long unsigned int)mb->start);
 			continue;
 		}
 		mt = &reserve_info->memtype_reserve_table[memtype];
-		mt->limit = max(mt->limit, mb->size);
+		size = total_stable_size(i);
+		mt->limit = max(mt->limit, size);
 	}
 }
 
@@ -271,21 +233,23 @@ static void __init reserve_memory_for_mempools(void)
 	struct memtype_reserve *mt;
 	struct membank *mb;
 	int ret;
+	unsigned long size;
 
 	mt = &reserve_info->memtype_reserve_table[0];
 	for (memtype = 0; memtype < MEMTYPE_MAX; memtype++, mt++) {
 		if (mt->flags & MEMTYPE_FLAGS_FIXED || !mt->size)
 			continue;
 
-		/* We know we will find a memory bank of the proper size
+		/* We know we will find memory bank(s) of the proper size
 		 * as we have limited the size of the memory pool for
-		 * each memory type to the size of the largest memory
-		 * bank. Choose the memory bank with the highest physical
+		 * each memory type to the largest total size of the memory
+		 * banks which are contiguous and of the correct memory type.
+		 * Choose the memory bank with the highest physical
 		 * address which is large enough, so that we will not
 		 * take memory from the lowest memory bank which the kernel
 		 * is in (and cause boot problems) and so that we might
 		 * be able to steal memory that would otherwise become
-		 * highmem.
+		 * highmem. However, do not use unstable memory.
 		 */
 		for (i = meminfo.nr_banks - 1; i >= 0; i--) {
 			mb = &meminfo.bank[i];
@@ -293,8 +257,17 @@ static void __init reserve_memory_for_mempools(void)
 				reserve_info->paddr_to_memtype(mb->start);
 			if (memtype != membank_type)
 				continue;
-			if (mb->size >= mt->size) {
-				mt->start = mb->start + mb->size - mt->size;
+			size = total_stable_size(i);
+			if (size >= mt->size) {
+				size = stable_size(mb,
+					reserve_info->low_unstable_address);
+				if (!size)
+					continue;
+				/* mt->size may be larger than size, all this
+				 * means is that we are carving the memory pool
+				 * out of multiple contiguous memory banks.
+				 */
+				mt->start = mb->start + (size - mt->size);
 				ret = memblock_remove(mt->start, mt->size);
 				BUG_ON(ret);
 				break;
@@ -320,10 +293,24 @@ static void __init initialize_mempools(void)
 	}
 }
 
+#define  MAX_FIXED_AREA_SIZE 0x11000000
+
 void __init msm_reserve(void)
 {
+	unsigned long msm_fixed_area_size;
+	unsigned long msm_fixed_area_start;
+
 	memory_pool_init();
 	reserve_info->calculate_reserve_sizes();
+
+	msm_fixed_area_size = reserve_info->fixed_area_size;
+	msm_fixed_area_start = reserve_info->fixed_area_start;
+	if (msm_fixed_area_size)
+		if (msm_fixed_area_start > reserve_info->low_unstable_address
+			- MAX_FIXED_AREA_SIZE)
+			reserve_info->low_unstable_address =
+			msm_fixed_area_start;
+
 	calculate_reserve_limits();
 	adjust_reserve_sizes();
 	reserve_memory_for_mempools();
@@ -349,7 +336,8 @@ EXPORT_SYMBOL(allocate_contiguous_ebi);
 unsigned long allocate_contiguous_ebi_nomap(unsigned long size,
 	unsigned long align)
 {
-	return allocate_contiguous_memory_nomap(size, get_ebi_memtype(), align);
+	return _allocate_contiguous_memory_nomap(size, get_ebi_memtype(),
+		align, __builtin_return_address(0));
 }
 EXPORT_SYMBOL(allocate_contiguous_ebi_nomap);
 
@@ -390,10 +378,12 @@ int32_t pmem_kalloc(const size_t size, const uint32_t flags)
 		return -EINVAL;
 	}
 
-	paddr = allocate_contiguous_memory_nomap(size, memtype, align);
+	paddr = _allocate_contiguous_memory_nomap(size, memtype, align,
+		__builtin_return_address(0));
+
 	if (!paddr && pmem_memtype == PMEM_MEMTYPE_SMI)
-		paddr = allocate_contiguous_memory_nomap(size,
-			ebi1_memtype, align);
+		paddr = _allocate_contiguous_memory_nomap(size,
+			ebi1_memtype, align, __builtin_return_address(0));
 
 	if (!paddr)
 		return -ENOMEM;
@@ -408,3 +398,156 @@ int pmem_kfree(const int32_t physaddr)
 	return 0;
 }
 EXPORT_SYMBOL(pmem_kfree);
+
+unsigned int msm_ttbr0;
+
+void store_ttbr0(void)
+{
+	/* Store TTBR0 for post-mortem debugging purposes. */
+	asm("mrc p15, 0, %0, c2, c0, 0\n"
+		: "=r" (msm_ttbr0));
+}
+
+int request_fmem_c_region(void *unused)
+{
+	return fmem_set_state(FMEM_C_STATE);
+}
+
+int release_fmem_c_region(void *unused)
+{
+	return fmem_set_state(FMEM_T_STATE);
+}
+
+static char * const memtype_names[] = {
+	[MEMTYPE_SMI_KERNEL] = "SMI_KERNEL",
+	[MEMTYPE_SMI]	= "SMI",
+	[MEMTYPE_EBI0] = "EBI0",
+	[MEMTYPE_EBI1] = "EBI1",
+};
+
+int msm_get_memory_type_from_name(const char *memtype_name)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(memtype_names); i++) {
+		if (memtype_names[i] &&
+		    strcmp(memtype_name, memtype_names[i]) == 0)
+			return i;
+	}
+
+	pr_err("Could not find memory type %s\n", memtype_name);
+	return -EINVAL;
+}
+
+static int reserve_memory_type(const char *mem_name,
+				struct memtype_reserve *reserve_table,
+				int size)
+{
+	int ret = msm_get_memory_type_from_name(mem_name);
+
+	if (ret >= 0) {
+		reserve_table[ret].size += size;
+		ret = 0;
+	}
+	return ret;
+}
+
+static int check_for_compat(unsigned long node)
+{
+	char **start = __compat_exports_start;
+
+	for ( ; start < __compat_exports_end; start++)
+		if (of_flat_dt_is_compatible(node, *start))
+			return 1;
+
+	return 0;
+}
+
+int __init dt_scan_for_memory_reserve(unsigned long node, const char *uname,
+		int depth, void *data)
+{
+	char *memory_name_prop;
+	unsigned int *memory_remove_prop;
+	unsigned long memory_name_prop_length;
+	unsigned long memory_remove_prop_length;
+	unsigned long memory_size_prop_length;
+	unsigned int *memory_size_prop;
+	unsigned int memory_size;
+	unsigned int memory_start;
+	int ret;
+
+	memory_name_prop = of_get_flat_dt_prop(node,
+						"qcom,memory-reservation-type",
+						&memory_name_prop_length);
+	memory_remove_prop = of_get_flat_dt_prop(node,
+						"qcom,memblock-remove",
+						&memory_remove_prop_length);
+
+	if (memory_name_prop || memory_remove_prop) {
+		if (!check_for_compat(node))
+			goto out;
+	} else {
+		goto out;
+	}
+
+	if (memory_name_prop) {
+		if (strnlen(memory_name_prop, memory_name_prop_length) == 0) {
+			WARN(1, "Memory name was malformed\n");
+			goto mem_remove;
+		}
+
+		memory_size_prop = of_get_flat_dt_prop(node,
+						"qcom,memory-reservation-size",
+						&memory_size_prop_length);
+
+		if (memory_size_prop &&
+		    (memory_size_prop_length == sizeof(unsigned int))) {
+			memory_size = be32_to_cpu(*memory_size_prop);
+
+			if (reserve_memory_type(memory_name_prop,
+						data, memory_size) == 0)
+				pr_info("%s reserved %s size %x\n",
+					uname, memory_name_prop, memory_size);
+			else
+				WARN(1, "Node %s reserve failed\n",
+						uname);
+		} else {
+			WARN(1, "Node %s specified bad/nonexistent size\n",
+					uname);
+		}
+	}
+
+mem_remove:
+
+	if (memory_remove_prop) {
+		if (memory_remove_prop_length != (2*sizeof(unsigned int))) {
+			WARN(1, "Memory remove malformed\n");
+			goto out;
+		}
+
+		memory_start = be32_to_cpu(memory_remove_prop[0]);
+		memory_size = be32_to_cpu(memory_remove_prop[1]);
+
+		ret = memblock_remove(memory_start, memory_size);
+		if (ret)
+			WARN(1, "Failed to remove memory %x-%x\n",
+				memory_start, memory_start+memory_size);
+		else
+			pr_info("Node %s removed memory %x-%x\n", uname,
+				memory_start, memory_start+memory_size);
+	}
+
+out:
+	return 0;
+}
+
+unsigned long get_ddr_size(void)
+{
+	unsigned int i;
+	unsigned long ret = 0;
+
+	for (i = 0; i < meminfo.nr_banks; i++)
+		ret += meminfo.bank[i].size;
+
+	return ret;
+}

@@ -123,6 +123,8 @@ int dccp_parse_options(struct sock *sk, struct dccp_request_sock *dreq,
 		case DCCPO_CHANGE_L ... DCCPO_CONFIRM_R:
 			if (pkt_type == DCCP_PKT_DATA)      /* RFC 4340, 6 */
 				break;
+			if (len == 0)
+				goto out_invalid_option;
 			rc = dccp_feat_parse_options(sk, dreq, mandatory, opt,
 						    *value, value + 1, len - 1);
 			if (rc)
@@ -542,7 +544,7 @@ int dccp_insert_fn_opt(struct sk_buff *skb, u8 type, u8 feat,
 	}
 
 	if (unlikely(val == NULL || len == 0))
-		len = repeat_first = 0;
+		len = repeat_first = false;
 	tot_len = 3 + repeat_first + len;
 
 	if (DCCP_SKB_CB(skb)->dccpd_opt_len + tot_len > DCCP_MAX_OPT_LEN) {

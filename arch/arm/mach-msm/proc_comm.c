@@ -1,7 +1,7 @@
 /* arch/arm/mach-msm/proc_comm.c
  *
  * Copyright (C) 2007-2008 Google, Inc.
- * Copyright (c) 2009-2011, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2009-2012, The Linux Foundation. All rights reserved.
  * Author: Brian Swetland <swetland@google.com>
  *
  * This software is licensed under the terms of the GNU General Public
@@ -22,8 +22,8 @@
 #include <linux/module.h>
 #include <mach/msm_iomap.h>
 #include <mach/system.h>
+#include <mach/proc_comm.h>
 
-#include "proc_comm.h"
 #include "smd_private.h"
 
 static inline void notify_other_proc_comm(void)
@@ -31,7 +31,7 @@ static inline void notify_other_proc_comm(void)
 	/* Make sure the write completes before interrupt */
 	wmb();
 #if defined(CONFIG_ARCH_MSM7X30)
-	__raw_writel(1 << 6, MSM_GCC_BASE + 0x8);
+	__raw_writel(1 << 6, MSM_APCS_GCC_BASE + 0x8);
 #elif defined(CONFIG_ARCH_MSM8X60)
 	__raw_writel(1 << 5, MSM_GCC_BASE + 0x8);
 #else
@@ -79,14 +79,6 @@ void msm_proc_comm_reset_modem_now(void)
 {
 	unsigned base = (unsigned)MSM_SHARED_RAM_BASE;
 	unsigned long flags;
-
-#ifdef CONFIG_SEC_DEBUG
-	samsung_vendor1_id *smem_vendor1 = NULL;
-	unsigned size;
-	smem_vendor1 = (samsung_vendor1_id *)smem_get_entry\
-			(SMEM_ID_VENDOR1, &size);
-	smem_vendor1->apps_dump.apps = 0xf0;
-#endif /* CONFIG_SEC_DEBUG */
 
 	spin_lock_irqsave(&proc_comm_lock, flags);
 

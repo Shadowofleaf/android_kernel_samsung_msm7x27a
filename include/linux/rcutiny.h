@@ -31,6 +31,16 @@ static inline void rcu_init(void)
 {
 }
 
+static inline void rcu_barrier_bh(void)
+{
+	wait_rcu_gp(call_rcu_bh);
+}
+
+static inline void rcu_barrier_sched(void)
+{
+	wait_rcu_gp(call_rcu_sched);
+}
+
 #ifdef CONFIG_TINY_RCU
 
 static inline void synchronize_rcu_expedited(void)
@@ -45,8 +55,12 @@ static inline void rcu_barrier(void)
 
 #else /* #ifdef CONFIG_TINY_RCU */
 
-void rcu_barrier(void);
 void synchronize_rcu_expedited(void);
+
+static inline void rcu_barrier(void)
+{
+	wait_rcu_gp(call_rcu);
+}
 
 #endif /* #else #ifdef CONFIG_TINY_RCU */
 
@@ -63,6 +77,12 @@ static inline void synchronize_rcu_bh_expedited(void)
 static inline void synchronize_sched_expedited(void)
 {
 	synchronize_sched();
+}
+
+static inline void kfree_call_rcu(struct rcu_head *head,
+				  void (*func)(struct rcu_head *rcu))
+{
+	call_rcu(head, func);
 }
 
 #ifdef CONFIG_TINY_RCU
@@ -97,6 +117,14 @@ static inline void rcu_note_context_switch(int cpu)
 {
 	rcu_sched_qs(cpu);
 	rcu_preempt_note_context_switch();
+}
+
+/*
+ * Take advantage of the fact that there is only one CPU, which
+ * allows us to ignore virtualization-based context switches.
+ */
+static inline void rcu_virt_note_context_switch(int cpu)
+{
 }
 
 /*

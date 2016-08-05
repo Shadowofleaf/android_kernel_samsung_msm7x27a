@@ -25,18 +25,11 @@
 #include <linux/uaccess.h>
 #include <linux/miscdevice.h>
 #include <media/msm_camera.h>
-#include <mach/gpio.h>
+#include <linux/gpio.h>
 #include <mach/pmic.h>
+#include <linux/module.h>
 
-#if defined(CONFIG_MACH_JENA_TELSTRA)
-#if (CONFIG_MACH_JENA_HWREV == 0x0) || (CONFIG_MACH_JENA_HWREV == 0x1) || (CONFIG_MACH_JENA_HWREV == 0x2)
-#include "sr300pc20_S6500T.h"
-#else
-#include "sr300pc20_jena.h"
-#endif
-#elif defined(CONFIG_MACH_JENA_AUSVHA)
-#include "sr300pc20_jena.h"
-#elif defined(CONFIG_MACH_JENA)
+#if defined(CONFIG_MACH_JENA)
 #include "sr300pc20_jena.h"
 #else
 #include "sr300pc20.h"

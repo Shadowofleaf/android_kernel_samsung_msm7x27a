@@ -201,10 +201,11 @@ static int pca954x_probe(struct i2c_client *client,
 
 	i2c_set_clientdata(client, data);
 
-	/* Read the mux register at addr to verify
-	 * that the mux is in fact present.
+	/* Write the mux register at addr to verify
+	 * that the mux is in fact present. This also
+	 * initializes the mux to disconnected state.
 	 */
-	if (i2c_smbus_read_byte(client) < 0) {
+	if (i2c_smbus_write_byte(client, 0) < 0) {
 		dev_warn(&client->dev, "probe failed\n");
 		goto exit_free;
 	}
@@ -283,18 +284,7 @@ static struct i2c_driver pca954x_driver = {
 	.id_table	= pca954x_id,
 };
 
-static int __init pca954x_init(void)
-{
-	return i2c_add_driver(&pca954x_driver);
-}
-
-static void __exit pca954x_exit(void)
-{
-	i2c_del_driver(&pca954x_driver);
-}
-
-module_init(pca954x_init);
-module_exit(pca954x_exit);
+module_i2c_driver(pca954x_driver);
 
 MODULE_AUTHOR("Rodolfo Giometti <giometti@linux.it>");
 MODULE_DESCRIPTION("PCA954x I2C mux/switch driver");

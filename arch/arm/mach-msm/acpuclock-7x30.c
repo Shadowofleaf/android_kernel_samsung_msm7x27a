@@ -1,7 +1,7 @@
 /*
  *
  * Copyright (C) 2007 Google, Inc.
- * Copyright (c) 2007-2011, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2007-2012, The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -16,6 +16,7 @@
 
 #include <linux/version.h>
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/init.h>
 #include <linux/errno.h>
 #include <linux/string.h>
@@ -25,25 +26,22 @@
 #include <linux/mutex.h>
 #include <linux/io.h>
 #include <linux/sort.h>
+#include <linux/platform_device.h>
 #include <mach/board.h>
 #include <mach/msm_iomap.h>
 #include <asm/mach-types.h>
 
 #include "smd_private.h"
-#include "clock.h"
 #include "acpuclock.h"
 #include "spm.h"
 
-#define SCSS_CLK_CTL_ADDR	(MSM_ACC_BASE + 0x04)
-#define SCSS_CLK_SEL_ADDR	(MSM_ACC_BASE + 0x08)
+#define SCSS_CLK_CTL_ADDR	(MSM_ACC0_BASE + 0x04)
+#define SCSS_CLK_SEL_ADDR	(MSM_ACC0_BASE + 0x08)
 
 #define PLL2_L_VAL_ADDR		(MSM_CLK_CTL_BASE + 0x33C)
 #define PLL2_M_VAL_ADDR		(MSM_CLK_CTL_BASE + 0x340)
 #define PLL2_N_VAL_ADDR		(MSM_CLK_CTL_BASE + 0x344)
 #define PLL2_CONFIG_ADDR	(MSM_CLK_CTL_BASE + 0x34C)
-
-#define dprintk(msg...) \
-	cpufreq_debug_printk(CPUFREQ_DEBUG_DRIVER, "cpufreq-msm", msg)
 
 #define VREF_SEL     1	/* 0: 0.625V (50mV step), 1: 0.3125V (25mV step). */
 #define V_STEP       (25 * (2 - VREF_SEL)) /* Minimum voltage step size. */
@@ -59,8 +57,6 @@
 struct clock_state {
 	struct clkctl_acpu_speed	*current_speed;
 	struct mutex			lock;
-	uint32_t			acpu_switch_time_us;
-	uint32_t			vdd_switch_time_us;
 	struct clk			*ebi1_clk;
 };
 
@@ -136,22 +132,6 @@ static struct clkctl_acpu_speed acpu_freq_tbl[] = {
 	{ 0 }
 };
 
-#define POWER_COLLAPSE_KHZ MAX_AXI_KHZ
-unsigned long acpuclk_power_collapse(void)
-{
-	int ret = acpuclk_get_rate(smp_processor_id());
-	acpuclk_set_rate(smp_processor_id(), POWER_COLLAPSE_KHZ, SETRATE_PC);
-	return ret;
-}
-
-#define WAIT_FOR_IRQ_KHZ MAX_AXI_KHZ
-unsigned long acpuclk_wait_for_irq(void)
-{
-	int ret = acpuclk_get_rate(smp_processor_id());
-	acpuclk_set_rate(smp_processor_id(), WAIT_FOR_IRQ_KHZ, SETRATE_SWFI);
-	return ret;
-}
-
 static int acpuclk_set_acpu_vdd(struct clkctl_acpu_speed *s)
 {
 	int ret = msm_spm_set_vdd(0, s->vdd_raw);
@@ -159,7 +139,7 @@ static int acpuclk_set_acpu_vdd(struct clkctl_acpu_speed *s)
 		return ret;
 
 	/* Wait for voltage to stabilize. */
-	udelay(drv_state.vdd_switch_time_us);
+	udelay(62);
 	return 0;
 }
 
@@ -210,7 +190,8 @@ static void acpuclk_set_src(const struct clkctl_acpu_speed *s)
 	mb();
 }
 
-int acpuclk_set_rate(int cpu, unsigned long rate, enum setrate_reason reason)
+static int acpuclk_7x30_set_rate(int cpu, unsigned long rate,
+				 enum setrate_reason reason)
 {
 	struct clkctl_acpu_speed *tgt_s, *strt_s;
 	int res, rc = 0;
@@ -244,15 +225,14 @@ int acpuclk_set_rate(int cpu, unsigned long rate, enum setrate_reason reason)
 		}
 	}
 
-	dprintk("Switching from ACPU rate %u KHz -> %u KHz\n",
+	pr_debug("Switching from ACPU rate %u KHz -> %u KHz\n",
 	       strt_s->acpu_clk_khz, tgt_s->acpu_clk_khz);
 
 	/* Increase the AXI bus frequency if needed. This must be done before
 	 * increasing the ACPU frequency, since voting for high AXI rates
 	 * implicitly takes care of increasing the MSMC1 voltage, as needed. */
 	if (tgt_s->axi_clk_hz > strt_s->axi_clk_hz) {
-		rc = clk_set_min_rate(drv_state.ebi1_clk,
-					tgt_s->axi_clk_hz);
+		rc = clk_set_rate(drv_state.ebi1_clk, tgt_s->axi_clk_hz);
 		if (rc < 0) {
 			pr_err("Setting AXI min rate failed (%d)\n", rc);
 			goto out;
@@ -273,7 +253,7 @@ int acpuclk_set_rate(int cpu, unsigned long rate, enum setrate_reason reason)
 	/* Make sure target PLL is on. */
 	if ((strt_s->src != tgt_s->src && tgt_s->src >= 0) ||
 	    (tgt_s->src == PLL_2 && strt_s->src == PLL_2)) {
-		dprintk("Enabling PLL %d\n", tgt_s->src);
+		pr_debug("Enabling PLL %d\n", tgt_s->src);
 		clk_enable(acpuclk_sources[tgt_s->src]);
 	}
 
@@ -291,14 +271,13 @@ int acpuclk_set_rate(int cpu, unsigned long rate, enum setrate_reason reason)
 
 	/* Turn off previous PLL if not used. */
 	if (strt_s->src != tgt_s->src && strt_s->src >= 0) {
-		dprintk("Disabling PLL %d\n", strt_s->src);
+		pr_debug("Disabling PLL %d\n", strt_s->src);
 		clk_disable(acpuclk_sources[strt_s->src]);
 	}
 
 	/* Decrease the AXI bus frequency if we can. */
 	if (tgt_s->axi_clk_hz < strt_s->axi_clk_hz) {
-		res = clk_set_min_rate(drv_state.ebi1_clk,
-					tgt_s->axi_clk_hz);
+		res = clk_set_rate(drv_state.ebi1_clk, tgt_s->axi_clk_hz);
 		if (res < 0)
 			pr_warning("Setting AXI min rate failed (%d)\n", res);
 	}
@@ -315,7 +294,7 @@ int acpuclk_set_rate(int cpu, unsigned long rate, enum setrate_reason reason)
 					tgt_s->vdd_mv, res);
 	}
 
-	dprintk("ACPU speed change complete\n");
+	pr_debug("ACPU speed change complete\n");
 out:
 	if (reason == SETRATE_CPUFREQ)
 		mutex_unlock(&drv_state.lock);
@@ -323,7 +302,7 @@ out:
 	return rc;
 }
 
-unsigned long acpuclk_get_rate(int cpu)
+static unsigned long acpuclk_7x30_get_rate(int cpu)
 {
 	WARN_ONCE(drv_state.current_speed == NULL,
 		  "acpuclk_get_rate: not initialized\n");
@@ -333,16 +312,11 @@ unsigned long acpuclk_get_rate(int cpu)
 		return 0;
 }
 
-uint32_t acpuclk_get_switch_time(void)
-{
-	return drv_state.acpu_switch_time_us;
-}
-
 /*----------------------------------------------------------------------------
  * Clock driver initialization
  *---------------------------------------------------------------------------*/
 
-static void __init acpuclk_init(void)
+static void __devinit acpuclk_hw_init(void)
 {
 	struct clkctl_acpu_speed *s;
 	uint32_t div, sel, src_num;
@@ -410,7 +384,7 @@ static void __init acpuclk_init(void)
 	if (s->src >= 0)
 		clk_enable(acpuclk_sources[s->src]);
 
-	res = clk_set_min_rate(drv_state.ebi1_clk, s->axi_clk_hz);
+	res = clk_set_rate(drv_state.ebi1_clk, s->axi_clk_hz);
 	if (res < 0)
 		pr_warning("Setting AXI min rate failed!\n");
 
@@ -420,7 +394,7 @@ static void __init acpuclk_init(void)
 }
 
 /* Initalize the lpj field in the acpu_freq_tbl. */
-static void __init lpj_init(void)
+static void __devinit lpj_init(void)
 {
 	int i;
 	const struct clkctl_acpu_speed *base_clk = drv_state.current_speed;
@@ -458,7 +432,7 @@ static inline void setup_cpufreq_table(void) { }
  * Truncate the frequency table at the current PLL2 rate and determine the
  * backup PLL to use when scaling PLL2.
  */
-void __init pll2_fixup(void)
+void __devinit pll2_fixup(void)
 {
 	struct clkctl_acpu_speed *speed = acpu_freq_tbl;
 	u8 pll2_l = readl_relaxed(PLL2_L_VAL_ADDR) & 0xFF;
@@ -480,7 +454,7 @@ void __init pll2_fixup(void)
 #define RPM_BYPASS_MASK	(1 << 3)
 #define PMIC_MODE_MASK	(1 << 4)
 
-static void __init populate_plls(void)
+static void __devinit populate_plls(void)
 {
 	acpuclk_sources[PLL_1] = clk_get_sys("acpu", "pll1_clk");
 	BUG_ON(IS_ERR(acpuclk_sources[PLL_1]));
@@ -488,18 +462,49 @@ static void __init populate_plls(void)
 	BUG_ON(IS_ERR(acpuclk_sources[PLL_2]));
 	acpuclk_sources[PLL_3] = clk_get_sys("acpu", "pll3_clk");
 	BUG_ON(IS_ERR(acpuclk_sources[PLL_3]));
+	/*
+	 * Prepare all the PLLs because we enable/disable them
+	 * from atomic context and can't always ensure they're
+	 * all prepared in non-atomic context.
+	 */
+	BUG_ON(clk_prepare(acpuclk_sources[PLL_1]));
+	BUG_ON(clk_prepare(acpuclk_sources[PLL_2]));
+	BUG_ON(clk_prepare(acpuclk_sources[PLL_3]));
 }
 
-void __init msm_acpu_clock_init(struct msm_acpu_clock_platform_data *clkdata)
+static struct acpuclk_data acpuclk_7x30_data = {
+	.set_rate = acpuclk_7x30_set_rate,
+	.get_rate = acpuclk_7x30_get_rate,
+	.power_collapse_khz = MAX_AXI_KHZ,
+	.wait_for_irq_khz = MAX_AXI_KHZ,
+	.switch_time_us = 50,
+};
+
+static int __devinit acpuclk_7x30_probe(struct platform_device *pdev)
 {
-	pr_info("acpu_clock_init()\n");
+	pr_info("%s()\n", __func__);
 
 	mutex_init(&drv_state.lock);
-	drv_state.acpu_switch_time_us = clkdata->acpu_switch_time_us;
-	drv_state.vdd_switch_time_us = clkdata->vdd_switch_time_us;
 	pll2_fixup();
 	populate_plls();
-	acpuclk_init();
+	acpuclk_hw_init();
 	lpj_init();
 	setup_cpufreq_table();
+	acpuclk_register(&acpuclk_7x30_data);
+
+	return 0;
 }
+
+static struct platform_driver acpuclk_7x30_driver = {
+	.probe = acpuclk_7x30_probe,
+	.driver = {
+		.name = "acpuclk-7x30",
+		.owner = THIS_MODULE,
+	},
+};
+
+static int __init acpuclk_7x30_init(void)
+{
+	return platform_driver_register(&acpuclk_7x30_driver);
+}
+postcore_initcall(acpuclk_7x30_init);

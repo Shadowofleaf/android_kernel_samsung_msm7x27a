@@ -1,41 +1,30 @@
-/* Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2010-2014, The Linux Foundation. All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- *       copyright notice, this list of conditions and the following
- *       disclaimer in the documentation and/or other materials provided
- *       with the distribution.
- *     * Neither the name of Code Aurora Forum, Inc. nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
  *
- * THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
- * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
- * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
- * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
- * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  *
  */
 #ifndef __APR_H_
 #define __APR_H_
 
-#define APR_Q6_NOIMG   0
-#define APR_Q6_LOADING 1
-#define APR_Q6_LOADED  2
+#include <linux/mutex.h>
+
+enum apr_subsys_state {
+	APR_SUBSYS_DOWN,
+	APR_SUBSYS_UP,
+	APR_SUBSYS_LOADED,
+};
 
 struct apr_q6 {
 	void *pil;
-	uint32_t state;
+	atomic_t q6_state;
+	atomic_t modem_state;
 	struct mutex lock;
 };
 
@@ -92,7 +81,8 @@ struct apr_hdr {
 #define APR_SVC_ADSP_MVM	0x09
 #define APR_SVC_ADSP_CVS	0x0A
 #define APR_SVC_ADSP_CVP	0x0B
-#define APR_SVC_MAX		0x0C
+#define APR_SVC_USM		0x0C
+#define APR_SVC_MAX		0x0D
 
 /* Modem Service IDs */
 #define APR_SVC_MVS		0x3
@@ -102,7 +92,7 @@ struct apr_hdr {
 #define APR_SVC_SRD		0x7
 
 /* APR Port IDs */
-#define APR_MAX_PORTS		0x40
+#define APR_MAX_PORTS		0x80
 
 #define APR_NAME_MAX		0x40
 
@@ -153,6 +143,12 @@ struct apr_client {
 	struct apr_svc svc[APR_SVC_MAX];
 };
 
+int apr_load_adsp_image(void);
+struct apr_client *apr_get_client(int dest_id, int client_id);
+int apr_wait_for_device_up(int dest_id);
+int apr_get_svc(const char *svc_name, int dest_id, int *client_id,
+		int *svc_idx, int *svc_id);
+void apr_cb_func(void *buf, int len, void *priv);
 struct apr_svc *apr_register(char *dest, char *svc_name, apr_fn svc_fn,
 					uint32_t src_port, void *priv);
 inline int apr_fill_hdr(void *handle, uint32_t *buf, uint16_t src_port,
@@ -164,4 +160,9 @@ int apr_deregister(void *handle);
 void change_q6_state(int state);
 void q6audio_dsp_not_responding(void);
 void apr_reset(void *handle);
+enum apr_subsys_state apr_get_modem_state(void);
+void apr_set_modem_state(enum apr_subsys_state state);
+enum apr_subsys_state apr_get_q6_state(void);
+int apr_set_q6_state(enum apr_subsys_state state);
+void apr_set_subsys_state(void);
 #endif
