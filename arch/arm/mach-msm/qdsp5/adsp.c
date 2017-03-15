@@ -1080,6 +1080,21 @@ int msm_adsp_generate_event(void *data,
 	return 0;
 }
 
+int msm_adsp_dump(struct msm_adsp_module *module)
+{
+	int rc = 0;
+	if (!module) {
+		MM_INFO("Invalid module. Dumps are not collected\n");
+		return -EINVAL;
+	}
+	MM_INFO("starting DSP DUMP\n");
+	rc = rpc_adsp_rtos_app_to_modem(RPC_ADSP_RTOS_CMD_CORE_DUMP,
+			module->id, module);
+	MM_INFO("DSP DUMP done rc =%d\n", rc);
+	return rc;
+}
+EXPORT_SYMBOL(msm_adsp_dump);
+
 int msm_adsp_enable(struct msm_adsp_module *module)
 {
 	int rc = 0;
@@ -1090,9 +1105,9 @@ int msm_adsp_enable(struct msm_adsp_module *module)
 
 	MM_INFO("enable '%s'state[%d] id[%d]\n",
 				module->name, module->state, module->id);
-	if (!strncmp(module->name, "JPEGTASK", sizeof(module->name)))
+	if (!strncmp(module->name, "JPEGTASK", sizeof(*module->name)))
 		module_en = find_adsp_module_by_name(&adsp_info, "VIDEOTASK");
-	else if (!strncmp(module->name, "VIDEOTASK", sizeof(module->name)))
+	else if (!strncmp(module->name, "VIDEOTASK", sizeof(*module->name)))
 		module_en = find_adsp_module_by_name(&adsp_info, "JPEGTASK");
 	if (module_en) {
 		mutex_lock(&module_en->lock);
@@ -1123,6 +1138,7 @@ int msm_adsp_enable(struct msm_adsp_module *module)
 			rc = 0;
 		} else {
 			MM_ERR("module '%s' enable timed out\n", module->name);
+			msm_adsp_dump(module);
 			rc = -ETIMEDOUT;
 		}
 		if (module->open_count++ == 0 && module->clk)
@@ -1486,7 +1502,11 @@ static int __init adsp_init(void)
 		return -ENOMEM;
 	msm_adsp_driver.driver.name = msm_adsp_driver_name;
 	rc = platform_driver_register(&msm_adsp_driver);
+<<<<<<< HEAD
 	MM_INFO("%s -- %d\n", msm_adsp_driver_name, rc);
+=======
+	MM_DBG("%s -- %d\n", msm_adsp_driver_name, rc);
+>>>>>>> abb6419... Sync with TeamHackLG
 	return rc;
 }
 

@@ -191,7 +191,11 @@ int videobuf2_pmem_contig_user_get(struct videobuf2_contig_pmem *mem,
 		pr_err("%s ION import failed\n", __func__);
 		return PTR_ERR(mem->ion_handle);
 	}
+<<<<<<< HEAD
 	rc = ion_map_iommu(client, mem->ion_handle, domain_num, 0,
+=======
+	rc = ion_map_iommu(client, mem->ion_handle, CAMERA_DOMAIN, GEN_POOL,
+>>>>>>> abb6419... Sync with TeamHackLG
 		SZ_4K, 0, (unsigned long *)&mem->phyaddr, &len, 0, 0);
 	if (rc < 0)
 		ion_free(client, mem->ion_handle);
